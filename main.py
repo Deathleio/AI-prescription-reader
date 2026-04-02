@@ -4,21 +4,24 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
-import google.generativeai as genai
+from dotenv import load_dotenv
+
+# 1. Import the BRAND NEW Google SDK
+from google import genai
+from google.genai import types
+
+load_dotenv()
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Initialize Gemini API securely using environment variables
-genai.configure(api_key=os.environ.get("AIzaSyCQXqG1L42yLE8kjDpgaWzeHMCodLdXXRs"))
+# 2. Grab the key
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("CRITICAL ERROR: GEMINI_API_KEY not found. Please check your .env file!")
 
-# Keep both models as Flash
-vision_model = genai.GenerativeModel('gemini-2.5-flash') 
-eval_model = genai.GenerativeModel('gemini-2.5-flash')
-meta_model = genai.GenerativeModel(
-    'gemini-2.5-flash',
-    generation_config={"response_mime_type": "application/json"}
-)
+# 3. Initialize the new Client
+client = genai.Client(api_key=api_key)
 
 def clean_json_response(text: str) -> dict:
     cleaned = text.replace('```json', '').replace('```', '').strip()
@@ -30,11 +33,10 @@ def clean_json_response(text: str) -> dict:
 @app.post("/api/process-prescription")
 async def process_prescription(file: UploadFile = File(...)):
     try:
-        # 1. Read Image
         file_bytes = await file.read()
         image = Image.open(io.BytesIO(file_bytes))
         
-        # 2. Comprehensive Extraction Phase
+        # --- 1. EXTRACTION PHASE ---
         extractor_prompt = """
         You are an expert medical transcription AI processing an Indian Government Hospital OPD Patient Card. 
         Extract ALL available information from the image into the strict JSON schema below. 
@@ -45,10 +47,11 @@ async def process_prescription(file: UploadFile = File(...)):
         3. Look at the 'Clinical Notes' column (usually left) for vitals (BP, P for pulse), chief complaints, and past lab results.
         4. Look at the 'Advice' column (usually right) for Lab Investigations ordered.
         5. Look at the 'Advice' or 'Adv' section for medications. YOU MUST EXTRACT EVERY SINGLE MEDICATION LISTED. Read carefully from the top of the list all the way to the very bottom of the page. Do not stop early.
-        6. NO SHORTHAND OR ABBREVIATIONS: You MUST expand all medical shorthand, acronyms, and abbreviations into their full, complete English words. 
-           - Complaints: 'DM' -> 'Diabetes Mellitus', 'CVA' -> 'Cerebrovascular Accident', 'F/U' -> 'Follow-up'.
-           - Drugs: 'MFN' -> 'Metformin', 'Glim' -> 'Glimepiride', 'Atorva' -> 'Atorvastatin'.
-           - Frequencies: 'OD' -> 'Once daily', 'BD' -> 'Twice daily', 'BBF' -> 'Before Breakfast', 'HS' -> 'At bedtime'.
+        6. NO SHORTHAND OR ABBREVIATIONS: You MUST expand all medical shorthand, acronyms, and abbreviations into their full, complete English words. Do not output raw abbreviations.
+           - Complaints: 'DM' -> 'Diabetes Mellitus', 'CVA' -> 'Cerebrovascular Accident', 'HTN' -> 'Hypertension', 'F/U' -> 'Follow-up'.
+           - Forms: 'Tab' -> 'Tablet', 'Cap' -> 'Capsule', 'Syr' -> 'Syrup', 'Inj' -> 'Injection'.
+           - Drugs: 'MFN' -> 'Metformin', 'Glim' -> 'Glimepiride', 'Atorva' -> 'Atorvastatin', 'Panto' -> 'Pantoprazole'.
+           - Frequencies: 'OD' -> 'Once daily', 'BD' -> 'Twice daily', 'TDS' -> 'Three times daily', 'BBF' -> 'Before Breakfast', 'HS' -> 'At bedtime', 'PC' -> 'After meals'.
         7. Output ONLY raw JSON. Do not include markdown formatting.
         
         REQUIRED SCHEMA:
@@ -72,13 +75,17 @@ async def process_prescription(file: UploadFile = File(...)):
           ]
         }
         """
-        extraction_response = vision_model.generate_content([extractor_prompt, image])
+        # New SDK Generation Syntax
+        extraction_response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[extractor_prompt, image]
+        )
         extracted_data = clean_json_response(extraction_response.text)
         
         if "error" in extracted_data:
             return {"status": "failed", "step": "extraction", "details": extracted_data}
 
-        # 3. Evaluation Phase (Judge 1)
+        # --- 2. EVALUATION PHASE (Judge 1) ---
         evaluator_prompt = f"""
         You are a Medical Data Validation Judge. Evaluate this comprehensive extracted JSON:
         {json.dumps(extracted_data)}
@@ -91,10 +98,13 @@ async def process_prescription(file: UploadFile = File(...)):
         Return ONLY a JSON object:
         {{"accuracy_score": integer (0-100), "warnings": ["..."], "summary": "..."}}
         """
-        eval_response = eval_model.generate_content(evaluator_prompt)
+        eval_response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=evaluator_prompt
+        )
         evaluation_data = clean_json_response(eval_response.text)
 
-        # 4. Meta-Evaluation Phase (The Auditor)
+        # --- 3. META-EVALUATION PHASE (Auditor) ---
         meta_prompt = f"""
         You are a Senior Medical AI Quality Auditor with deep expertise in Indian clinical documentation standards. Your job is to rigorously audit whether "Judge 1" evaluated a prescription extraction fairly, accurately, and completely.
 
@@ -142,10 +152,17 @@ async def process_prescription(file: UploadFile = File(...)):
           "audit_summary": "string"
         }}
         """
-        meta_response = meta_model.generate_content(meta_prompt)
+        # Using the new SDK's JSON configuration
+        meta_response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=meta_prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
         meta_evaluation_data = json.loads(meta_response.text) 
 
-        # 5. Return Combined Result
+        # --- RETURN COMBINED RESULT ---
         return {
             "status": "success",
             "extracted_data": extracted_data,

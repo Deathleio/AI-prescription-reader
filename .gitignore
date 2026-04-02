@@ -1,0 +1,16 @@
+# Ignore Environment Variables & Secrets
+.env
+.env.*
+
+# Ignore Python Cache & Virtual Environments
+__pycache__/
+venv/
+.venv/
+env/
+
+# Ignore Mac/OS System Files
+.DS_Store
+
+# Ignore Node Modules (If your React app is in the same folder)
+node_modules/
+build/

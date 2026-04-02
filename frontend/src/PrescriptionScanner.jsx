@@ -5,6 +5,9 @@ export default function PrescriptionScanner() {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
+  
+  // NEW: Toggle state for hiding/showing the audit tools
+  const [isCustomerMode, setIsCustomerMode] = useState(true); 
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -28,7 +31,6 @@ export default function PrescriptionScanner() {
       
       const data = await response.json();
       
-      // Check if the backend threw our custom 429 error
       if (!response.ok) {
           alert(`Notice: ${data.detail}`);
           return;
@@ -44,8 +46,23 @@ export default function PrescriptionScanner() {
   };
 
   return (
-    <div style={{ maxWidth: '1000px', margin: '0 auto', fontFamily: 'sans-serif', padding: '20px' }}>
-      <h2 style={{ textAlign: 'center', color: '#333' }}>AI Prescription Digitization & Evaluation</h2>
+    <div style={{ maxWidth: '1000px', margin: '0 auto', fontFamily: 'sans-serif', padding: '20px', position: 'relative' }}>
+      
+      {/* --- NEW: Customer Mode Toggle Button --- */}
+      <button 
+        onClick={() => setIsCustomerMode(!isCustomerMode)}
+        style={{ 
+          position: 'absolute', top: '20px', right: '20px', 
+          padding: '8px 12px', fontSize: '12px', cursor: 'pointer', 
+          backgroundColor: isCustomerMode ? '#e2e8f0' : '#3b82f6', 
+          color: isCustomerMode ? '#475569' : '#fff', 
+          border: 'none', borderRadius: '4px', fontWeight: 'bold'
+        }}
+      >
+        {isCustomerMode ? '👁️ Enable Dev/Audit View' : '🙈 Hide Audit (Customer Mode)'}
+      </button>
+
+      <h2 style={{ textAlign: 'center', color: '#333', marginTop: '10px' }}>AI Prescription Digitization</h2>
       
       {/* Upload Section */}
       <div style={{ border: '2px dashed #ccc', padding: '20px', textAlign: 'center', marginBottom: '20px', backgroundColor: '#fafafa', borderRadius: '8px' }}>
@@ -79,68 +96,71 @@ export default function PrescriptionScanner() {
         <div style={{ flex: '1 1 500px' }}>
           {results && results.status === 'success' && (
             <>
-              {/* --- ADVANCED: Meta-Evaluation (Auditor) Dashboard --- */}
-              {results.meta_evaluation && (
-                <div style={{ backgroundColor: '#f0f4f8', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #cdd4e0', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
-                  <h3 style={{ margin: '0 0 15px 0', color: '#1a365d', borderBottom: '2px solid #cbd5e1', paddingBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>⚖️ Senior Auditor Verdict</span>
-                    <span style={{ fontSize: '14px', padding: '4px 10px', borderRadius: '15px', backgroundColor: results.meta_evaluation.judge_1_agreement ? '#d1fae5' : '#fee2e2', color: results.meta_evaluation.judge_1_agreement ? '#065f46' : '#991b1b' }}>
-                      Agreement: {results.meta_evaluation.judge_1_agreement ? "✅ YES" : "❌ NO"}
-                    </span>
-                  </h3>
-                  
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-                    <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                      <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Auditor's Grade of Judge 1</div>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: results.meta_evaluation.meta_score >= 80 ? '#059669' : '#dc2626' }}>{results.meta_evaluation.meta_score}/100</div>
-                    </div>
-                    <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                      <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Corrected Quality Score</div>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>{results.meta_evaluation.corrected_accuracy_score}/100</div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>Bias: {results.meta_evaluation.score_bias?.replace('_', ' ').toUpperCase() || 'N/A'}</div>
-                    </div>
-                  </div>
-
-                  <div style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
-                    <p style={{ margin: '0 0 10px 0', color: '#334155' }}>
-                      <strong>Audit Summary:</strong> {results.meta_evaluation.audit_summary}
-                    </p>
-                    
-                    {results.meta_evaluation.false_positives?.length > 0 && (
-                      <div style={{ marginTop: '10px' }}>
-                        <strong style={{ color: '#ea580c' }}>⚠️ False Positives (Judge was too harsh):</strong>
-                        <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
-                          {results.meta_evaluation.false_positives.map((fp, i) => <li key={i}>{fp}</li>)}
-                        </ul>
+              {/* --- ONLY SHOW AUDIT TOOLS IF CUSTOMER MODE IS OFF --- */}
+              {!isCustomerMode && (
+                <>
+                  {/* Meta-Evaluation (Auditor) Dashboard */}
+                  {results.meta_evaluation && (
+                    <div style={{ backgroundColor: '#f0f4f8', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #cdd4e0', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+                      <h3 style={{ margin: '0 0 15px 0', color: '#1a365d', borderBottom: '2px solid #cbd5e1', paddingBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>⚖️ Senior Auditor Verdict</span>
+                        <span style={{ fontSize: '14px', padding: '4px 10px', borderRadius: '15px', backgroundColor: results.meta_evaluation.judge_1_agreement ? '#d1fae5' : '#fee2e2', color: results.meta_evaluation.judge_1_agreement ? '#065f46' : '#991b1b' }}>
+                          Agreement: {results.meta_evaluation.judge_1_agreement ? "✅ YES" : "❌ NO"}
+                        </span>
+                      </h3>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
+                        <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                          <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Auditor's Grade of Judge 1</div>
+                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: results.meta_evaluation.meta_score >= 80 ? '#059669' : '#dc2626' }}>{results.meta_evaluation.meta_score}/100</div>
+                        </div>
+                        <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                          <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Corrected Quality Score</div>
+                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>{results.meta_evaluation.corrected_accuracy_score}/100</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Bias: {results.meta_evaluation.score_bias?.replace('_', ' ').toUpperCase() || 'N/A'}</div>
+                        </div>
                       </div>
-                    )}
 
-                    {results.meta_evaluation.false_negatives?.length > 0 && (
-                      <div style={{ marginTop: '10px' }}>
-                        <strong style={{ color: '#dc2626' }}>🚨 False Negatives (Judge missed this error):</strong>
-                        <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
-                          {results.meta_evaluation.false_negatives.map((fn, i) => <li key={i}>{fn}</li>)}
-                        </ul>
+                      <div style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
+                        <p style={{ margin: '0 0 10px 0', color: '#334155' }}>
+                          <strong>Audit Summary:</strong> {results.meta_evaluation.audit_summary}
+                        </p>
+                        {results.meta_evaluation.false_positives?.length > 0 && (
+                          <div style={{ marginTop: '10px' }}>
+                            <strong style={{ color: '#ea580c' }}>⚠️ False Positives:</strong>
+                            <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
+                              {results.meta_evaluation.false_positives.map((fp, i) => <li key={i}>{fp}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {results.meta_evaluation.false_negatives?.length > 0 && (
+                          <div style={{ marginTop: '10px' }}>
+                            <strong style={{ color: '#dc2626' }}>🚨 False Negatives:</strong>
+                            <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
+                              {results.meta_evaluation.false_negatives.map((fn, i) => <li key={i}>{fn}</li>)}
+                            </ul>
+                          </div>
+                        )}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Evaluation Score Panel */}
+                  <div style={{ backgroundColor: results.evaluation.accuracy_score > 80 ? '#d4edda' : '#f8d7da', padding: '15px', borderRadius: '8px', marginBottom: '20px', border: `1px solid ${results.evaluation.accuracy_score > 80 ? '#c3e6cb' : '#f5c6cb'}` }}>
+                    <h3 style={{ margin: '0 0 10px 0', color: results.evaluation.accuracy_score > 80 ? '#155724' : '#721c24' }}>
+                      Judge 1 Initial Score: {results.evaluation.accuracy_score}/100
+                    </h3>
+                    <p style={{ margin: '0 0 10px 0', color: '#333' }}><strong>Summary:</strong> {results.evaluation.summary}</p>
+                    {results.evaluation.warnings?.length > 0 && (
+                      <ul style={{ color: '#721c24', paddingLeft: '20px', margin: '0', fontSize: '14px' }}>
+                        {results.evaluation.warnings.map((warn, i) => <li key={i}>{warn}</li>)}
+                      </ul>
                     )}
                   </div>
-                </div>
+                </>
               )}
 
-              {/* Evaluation Score Panel */}
-              <div style={{ backgroundColor: results.evaluation.accuracy_score > 80 ? '#d4edda' : '#f8d7da', padding: '15px', borderRadius: '8px', marginBottom: '20px', border: `1px solid ${results.evaluation.accuracy_score > 80 ? '#c3e6cb' : '#f5c6cb'}` }}>
-                <h3 style={{ margin: '0 0 10px 0', color: results.evaluation.accuracy_score > 80 ? '#155724' : '#721c24' }}>
-                  Judge 1 Initial Score: {results.evaluation.accuracy_score}/100
-                </h3>
-                <p style={{ margin: '0 0 10px 0', color: '#333' }}><strong>Summary:</strong> {results.evaluation.summary}</p>
-                {results.evaluation.warnings?.length > 0 && (
-                  <ul style={{ color: '#721c24', paddingLeft: '20px', margin: '0', fontSize: '14px' }}>
-                    {results.evaluation.warnings.map((warn, i) => <li key={i}>{warn}</li>)}
-                  </ul>
-                )}
-              </div>
-
-              {/* Comprehensive Extracted Data Panel */}
+              {/* Comprehensive Extracted Data Panel (ALWAYS VISIBLE) */}
               <div style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
                 <h2 style={{ borderBottom: '2px solid #007bff', paddingBottom: '10px', marginTop: '0' }}>Digitized Patient Record</h2>
                 
@@ -152,7 +172,6 @@ export default function PrescriptionScanner() {
                     <div><span style={{ color: '#888' }}>Age/Sex:</span> <br/><strong>{results.extracted_data.patient_demographics?.age || '-'} / {results.extracted_data.patient_demographics?.gender || '-'}</strong></div>
                     <div><span style={{ color: '#888' }}>Reg No:</span> <br/><strong>{results.extracted_data.patient_demographics?.registration_number || '-'}</strong></div>
                     
-                    {/* --- THE UPDATED VISIT DATE UI --- */}
                     <div style={{ backgroundColor: '#e6f2ff', padding: '8px', borderRadius: '4px', borderLeft: '3px solid #007bff' }}>
                       <span style={{ color: '#0056b3', fontWeight: 'bold' }}>Initial Visit:</span> <br/>
                       <strong style={{ fontSize: '15px' }}>{results.extracted_data.patient_demographics?.visit_date || 'Not Found'}</strong>
