@@ -10,7 +10,10 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-load_dotenv()
+# --- NEW: BULLETPROOF ENV LOADER ---
+# This forces Python to look for the .env file in the exact same folder as main.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -18,10 +21,12 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # 2. Grab the key
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
-    raise ValueError("CRITICAL ERROR: GEMINI_API_KEY not found. Please check your .env file!")
+    raise ValueError(f"CRITICAL ERROR: GEMINI_API_KEY not found. Looked in: {os.path.join(BASE_DIR, '.env')}")
 
 # 3. Initialize the new Client
 client = genai.Client(api_key=api_key)
+
+# ... rest of your code stays exactly the same ...
 
 def clean_json_response(text: str) -> dict:
     cleaned = text.replace('```json', '').replace('```', '').strip()
@@ -174,10 +179,19 @@ async def process_prescription(file: UploadFile = File(...)):
         error_str = str(e)
         print(f"🔥 THE EXACT ERROR IS: {error_str}") 
         
+        # Catch 429 Quota limit errors
         if "429" in error_str or "Quota exceeded" in error_str:
             raise HTTPException(
                 status_code=429, 
                 detail="API cooling down. Please wait 60 seconds and try again!"
             )
             
+        # NEW: Catch 503 Server Overload errors
+        if "503" in error_str or "UNAVAILABLE" in error_str or "high demand" in error_str.lower():
+            raise HTTPException(
+                status_code=503, 
+                detail="Google's AI servers are currently experiencing high demand. Please try again in a few moments!"
+            )
+            
+        # Catch any other general errors
         raise HTTPException(status_code=500, detail=error_str)

@@ -5,8 +5,6 @@ export default function PrescriptionScanner() {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
-  
-  // NEW: Toggle state for hiding/showing the audit tools
   const [isCustomerMode, setIsCustomerMode] = useState(true); 
 
   const handleFileChange = (e) => {
@@ -45,12 +43,42 @@ export default function PrescriptionScanner() {
     }
   };
 
+  // --- NEW: Download JSON Function ---
+  const handleDownloadJSON = () => {
+    if (!results || !results.extracted_data) return;
+    const patientName = results.extracted_data.patient_demographics?.name?.replace(/\s+/g, '_') || 'patient';
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(results.extracted_data, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `prescription_${patientName}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  // --- NEW: Print/Save PDF Function ---
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto', fontFamily: 'sans-serif', padding: '20px', position: 'relative' }}>
       
-      {/* --- NEW: Customer Mode Toggle Button --- */}
+      {/* --- NEW: CSS for clean printing. Hides buttons and UI elements when saving as PDF --- */}
+      <style>
+        {`
+          @media print {
+            .no-print { display: none !important; }
+            body { background-color: #fff; }
+            .print-clean { box-shadow: none !important; border: none !important; }
+          }
+        `}
+      </style>
+
+      {/* Customer Mode Toggle Button */}
       <button 
         onClick={() => setIsCustomerMode(!isCustomerMode)}
+        className="no-print"
         style={{ 
           position: 'absolute', top: '20px', right: '20px', 
           padding: '8px 12px', fontSize: '12px', cursor: 'pointer', 
@@ -62,10 +90,10 @@ export default function PrescriptionScanner() {
         {isCustomerMode ? '👁️ Enable Dev/Audit View' : '🙈 Hide Audit (Customer Mode)'}
       </button>
 
-      <h2 style={{ textAlign: 'center', color: '#333', marginTop: '10px' }}>AI Prescription Digitization</h2>
+      <h2 className="no-print" style={{ textAlign: 'center', color: '#333', marginTop: '10px' }}>AI Prescription Digitization</h2>
       
       {/* Upload Section */}
-      <div style={{ border: '2px dashed #ccc', padding: '20px', textAlign: 'center', marginBottom: '20px', backgroundColor: '#fafafa', borderRadius: '8px' }}>
+      <div className="no-print" style={{ border: '2px dashed #ccc', padding: '20px', textAlign: 'center', marginBottom: '20px', backgroundColor: '#fafafa', borderRadius: '8px' }}>
         <input type="file" accept="image/*" onChange={handleFileChange} />
         <br /><br />
         <button 
@@ -81,7 +109,7 @@ export default function PrescriptionScanner() {
       <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
         
         {/* Left Column: Image Preview */}
-        <div style={{ flex: '1 1 400px' }}>
+        <div className="no-print" style={{ flex: '1 1 400px' }}>
           <h3>Original Document</h3>
           {preview ? (
             <img src={preview} alt="Preview" style={{ width: '100%', border: '1px solid #ddd', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }} />
@@ -96,12 +124,12 @@ export default function PrescriptionScanner() {
         <div style={{ flex: '1 1 500px' }}>
           {results && results.status === 'success' && (
             <>
-              {/* --- ONLY SHOW AUDIT TOOLS IF CUSTOMER MODE IS OFF --- */}
+              {/* AUDIT TOOLS (Hidden in Customer Mode or while printing) */}
               {!isCustomerMode && (
-                <>
-                  {/* Meta-Evaluation (Auditor) Dashboard */}
+                <div className="no-print">
+                  {/* Meta-Evaluation Dashboard */}
                   {results.meta_evaluation && (
-                    <div style={{ backgroundColor: '#f0f4f8', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #cdd4e0', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
+                    <div style={{ backgroundColor: '#f0f4f8', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #cdd4e0' }}>
                       <h3 style={{ margin: '0 0 15px 0', color: '#1a365d', borderBottom: '2px solid #cbd5e1', paddingBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span>⚖️ Senior Auditor Verdict</span>
                         <span style={{ fontSize: '14px', padding: '4px 10px', borderRadius: '15px', backgroundColor: results.meta_evaluation.judge_1_agreement ? '#d1fae5' : '#fee2e2', color: results.meta_evaluation.judge_1_agreement ? '#065f46' : '#991b1b' }}>
@@ -117,30 +145,7 @@ export default function PrescriptionScanner() {
                         <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
                           <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Corrected Quality Score</div>
                           <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>{results.meta_evaluation.corrected_accuracy_score}/100</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>Bias: {results.meta_evaluation.score_bias?.replace('_', ' ').toUpperCase() || 'N/A'}</div>
                         </div>
-                      </div>
-
-                      <div style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
-                        <p style={{ margin: '0 0 10px 0', color: '#334155' }}>
-                          <strong>Audit Summary:</strong> {results.meta_evaluation.audit_summary}
-                        </p>
-                        {results.meta_evaluation.false_positives?.length > 0 && (
-                          <div style={{ marginTop: '10px' }}>
-                            <strong style={{ color: '#ea580c' }}>⚠️ False Positives:</strong>
-                            <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
-                              {results.meta_evaluation.false_positives.map((fp, i) => <li key={i}>{fp}</li>)}
-                            </ul>
-                          </div>
-                        )}
-                        {results.meta_evaluation.false_negatives?.length > 0 && (
-                          <div style={{ marginTop: '10px' }}>
-                            <strong style={{ color: '#dc2626' }}>🚨 False Negatives:</strong>
-                            <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
-                              {results.meta_evaluation.false_negatives.map((fn, i) => <li key={i}>{fn}</li>)}
-                            </ul>
-                          </div>
-                        )}
                       </div>
                     </div>
                   )}
@@ -151,18 +156,29 @@ export default function PrescriptionScanner() {
                       Judge 1 Initial Score: {results.evaluation.accuracy_score}/100
                     </h3>
                     <p style={{ margin: '0 0 10px 0', color: '#333' }}><strong>Summary:</strong> {results.evaluation.summary}</p>
-                    {results.evaluation.warnings?.length > 0 && (
-                      <ul style={{ color: '#721c24', paddingLeft: '20px', margin: '0', fontSize: '14px' }}>
-                        {results.evaluation.warnings.map((warn, i) => <li key={i}>{warn}</li>)}
-                      </ul>
-                    )}
                   </div>
-                </>
+                </div>
               )}
 
-              {/* Comprehensive Extracted Data Panel (ALWAYS VISIBLE) */}
-              <div style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
-                <h2 style={{ borderBottom: '2px solid #007bff', paddingBottom: '10px', marginTop: '0' }}>Digitized Patient Record</h2>
+              {/* Comprehensive Extracted Data Panel */}
+              <div className="print-clean" style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
+                
+                {/* --- NEW: Export Action Row --- */}
+                <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
+                  <h2 style={{ margin: '0', color: '#333' }}>Digitized Patient Record</h2>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button onClick={handleDownloadJSON} style={{ padding: '6px 12px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>
+                      ⬇️ JSON
+                    </button>
+                    <button onClick={handlePrint} style={{ padding: '6px 12px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>
+                      🖨️ Save PDF
+                    </button>
+                  </div>
+                </div>
+
+                {/* Print Title (Only visible when printing) */}
+                <h2 style={{ display: 'none' }} className="print-only-title">Digital Medical Record</h2>
+                <style>{`@media print { .print-only-title { display: block !important; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; } }`}</style>
                 
                 {/* Demographics Section */}
                 <div style={{ marginBottom: '15px' }}>
