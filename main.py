@@ -10,9 +10,12 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # Initialize Gemini API securely using environment variables
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+genai.configure(api_key=os.environ.get("AIzaSyC85uyvHe82hNCDi1inxQAz2uJ7HraoPwk"))
 
+# Use the heavier Pro model JUST for reading the messy handwriting
 vision_model = genai.GenerativeModel('gemini-2.5-flash') 
+
+# Keep the Judges as Flash so they are fast!
 eval_model = genai.GenerativeModel('gemini-2.5-flash')
 meta_model = genai.GenerativeModel(
     'gemini-2.5-flash',
@@ -34,6 +37,7 @@ async def process_prescription(file: UploadFile = File(...)):
         image = Image.open(io.BytesIO(file_bytes))
         
         # 2. Comprehensive Extraction Phase (Includes recorded_visit_dates)
+        # 2. Comprehensive Extraction Phase
         extractor_prompt = """
         You are an expert medical transcription AI processing an Indian Government Hospital OPD Patient Card. 
         Extract ALL available information from the image into the strict JSON schema below. 
@@ -43,7 +47,7 @@ async def process_prescription(file: UploadFile = File(...)):
         2. Look for stamped or handwritten dates in the 'Visit No:' boxes indicating previous or subsequent visits.
         3. Look at the 'Clinical Notes' column (usually left) for vitals (BP, P for pulse), chief complaints, and past lab results.
         4. Look at the 'Advice' column (usually right) for Lab Investigations ordered.
-        5. Look at the 'Advice' or 'Adv' section for medications. Separate them properly. 
+        5. Look at the 'Advice' or 'Adv' section for medications. YOU MUST EXTRACT EVERY SINGLE MEDICATION LISTED. Read carefully from the top of the list all the way to the very bottom of the page. Do not stop early. There are often 6 to 10 medications listed.
         6. Interpret abbreviations: OD = Once daily, BD = Twice daily, BBF = Before Breakfast, HS = At bedtime.
         7. Output ONLY raw JSON. Do not include markdown formatting.
         
