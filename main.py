@@ -6,27 +6,30 @@ from PIL import Image
 import io
 from dotenv import load_dotenv
 
-# 1. Import the BRAND NEW Google SDK
+# 1. Import the SDKs
 from google import genai
 from google.genai import types
+from openai import OpenAI  # <-- NEW OPENAI IMPORT
 
-# --- NEW: BULLETPROOF ENV LOADER ---
-# This forces Python to look for the .env file in the exact same folder as main.py
+# --- BULLETPROOF ENV LOADER ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# 2. Grab the key
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
+# 2. Grab the keys
+gemini_key = os.environ.get("GEMINI_API_KEY")
+openai_key = os.environ.get("OPENAI_API_KEY") # <-- NEW OPENAI KEY
+
+if not gemini_key:
     raise ValueError(f"CRITICAL ERROR: GEMINI_API_KEY not found. Looked in: {os.path.join(BASE_DIR, '.env')}")
+if not openai_key:
+    raise ValueError(f"CRITICAL ERROR: OPENAI_API_KEY not found. Looked in: {os.path.join(BASE_DIR, '.env')}")
 
-# 3. Initialize the new Client
-client = genai.Client(api_key=api_key)
-
-# ... rest of your code stays exactly the same ...
+# 3. Initialize Both Clients
+gemini_client = genai.Client(api_key=gemini_key)
+openai_client = OpenAI(api_key=openai_key) # <-- INITIALIZE OPENAI
 
 def clean_json_response(text: str) -> dict:
     cleaned = text.replace('```json', '').replace('```', '').strip()
@@ -41,7 +44,7 @@ async def process_prescription(file: UploadFile = File(...)):
         file_bytes = await file.read()
         image = Image.open(io.BytesIO(file_bytes))
         
-        # --- 1. EXTRACTION PHASE ---
+        # --- 1. EXTRACTION PHASE (Gemini 2.5 Flash) ---
         extractor_prompt = """
         You are an expert medical transcription AI processing an Indian Government Hospital OPD Patient Card. 
         Extract ALL available information from the image into the strict JSON schema below. 
@@ -80,8 +83,7 @@ async def process_prescription(file: UploadFile = File(...)):
           ]
         }
         """
-        # New SDK Generation Syntax
-        extraction_response = client.models.generate_content(
+        extraction_response = gemini_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=[extractor_prompt, image]
         )
@@ -90,7 +92,7 @@ async def process_prescription(file: UploadFile = File(...)):
         if "error" in extracted_data:
             return {"status": "failed", "step": "extraction", "details": extracted_data}
 
-        # --- 2. EVALUATION PHASE (Judge 1) ---
+        # --- 2. EVALUATION PHASE (Judge 1 - Gemini 2.5 Flash) ---
         evaluator_prompt = f"""
         You are a Medical Data Validation Judge. Evaluate this comprehensive extracted JSON:
         {json.dumps(extracted_data)}
@@ -103,13 +105,13 @@ async def process_prescription(file: UploadFile = File(...)):
         Return ONLY a JSON object:
         {{"accuracy_score": integer (0-100), "warnings": ["..."], "summary": "..."}}
         """
-        eval_response = client.models.generate_content(
+        eval_response = gemini_client.models.generate_content(
             model='gemini-2.5-flash',
             contents=evaluator_prompt
         )
         evaluation_data = clean_json_response(eval_response.text)
 
-        # --- 3. META-EVALUATION PHASE (Auditor) ---
+        # --- 3. META-EVALUATION PHASE (Auditor - OpenAI GPT-4o-mini) ---
         meta_prompt = f"""
         You are a Senior Medical AI Quality Auditor with deep expertise in Indian clinical documentation standards. Your job is to rigorously audit whether "Judge 1" evaluated a prescription extraction fairly, accurately, and completely.
 
@@ -136,9 +138,13 @@ async def process_prescription(file: UploadFile = File(...)):
         C) COMPLETENESS (25 pts)
         D) JUDGE CALIBRATION (25 pts)
 
-        ===== YOUR AUDIT TASK =====
+       ===== YOUR AUDIT TASK =====
         Score each dimension (A, B, C, D) out of their max 25 points based on how well Judge 1 performed that check. Sum them for the meta_score (0–100).
         For each dimension, identify FALSE POSITIVES, FALSE NEGATIVES, and SCORE BIAS.
+
+        CRITICAL REQUIREMENT FOR 'audit_summary': 
+        You MUST explicitly state EXACTLY why points were deducted. Do not give a generic summary. 
+        Example of a good summary: "Judge 1 lost 15 points in Completeness because it failed to penalize the missing frequency for Dicloxacillin. It lost 5 points in Structural Integrity for ignoring a misplaced lab test."
 
         Return ONLY a JSON object exactly matching this schema:
         {{
@@ -154,18 +160,37 @@ async def process_prescription(file: UploadFile = File(...)):
           "false_negatives": ["string"],
           "score_bias": "too_harsh" | "too_lenient" | "fair",
           "corrected_accuracy_score": integer,
-          "audit_summary": "string"
+          "audit_summary": "string - Detailed explanation of EXACTLY why points were deducted and from which specific dimensions."
         }}
         """
-        # Using the new SDK's JSON configuration
-        meta_response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=meta_prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
+        
+        try:
+            # --- NEW OPENAI API CALL ---
+            openai_response = openai_client.chat.completions.create(
+                model="gpt-4o-mini", # Fast, cheap, and extremely capable
+                response_format={ "type": "json_object" }, # Forces guaranteed JSON output
+                messages=[
+                    {"role": "system", "content": "You are a precise JSON-only medical auditor. Output strict JSON matching the requested schema."},
+                    {"role": "user", "content": meta_prompt}
+                ]
             )
-        )
-        meta_evaluation_data = json.loads(meta_response.text) 
+            
+            # Extract and parse the guaranteed JSON
+            openai_text = openai_response.choices[0].message.content
+            meta_evaluation_data = json.loads(openai_text) 
+
+        except Exception as api_error:
+            print(f"🔥 OpenAI Error: {str(api_error)}")
+            # Robust fallback data with the corrected_accuracy_score so the UI never blanks out
+            meta_evaluation_data = {
+                "meta_score": 0, 
+                "judge_1_agreement": False, 
+                "audit_summary": "OpenAI Auditor failed to respond.",
+                "dimension_scores": {},
+                "false_positives": [],
+                "false_negatives": [],
+                "corrected_accuracy_score": 0 
+            }
 
         # --- RETURN COMBINED RESULT ---
         return {
@@ -179,19 +204,16 @@ async def process_prescription(file: UploadFile = File(...)):
         error_str = str(e)
         print(f"🔥 THE EXACT ERROR IS: {error_str}") 
         
-        # Catch 429 Quota limit errors
         if "429" in error_str or "Quota exceeded" in error_str:
             raise HTTPException(
                 status_code=429, 
                 detail="API cooling down. Please wait 60 seconds and try again!"
             )
             
-        # NEW: Catch 503 Server Overload errors
         if "503" in error_str or "UNAVAILABLE" in error_str or "high demand" in error_str.lower():
             raise HTTPException(
                 status_code=503, 
                 detail="Google's AI servers are currently experiencing high demand. Please try again in a few moments!"
             )
             
-        # Catch any other general errors
         raise HTTPException(status_code=500, detail=error_str)

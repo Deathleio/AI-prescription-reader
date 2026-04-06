@@ -43,7 +43,7 @@ export default function PrescriptionScanner() {
     }
   };
 
-  // --- NEW: Download JSON Function ---
+  // --- Download JSON Function ---
   const handleDownloadJSON = () => {
     if (!results || !results.extracted_data) return;
     const patientName = results.extracted_data.patient_demographics?.name?.replace(/\s+/g, '_') || 'patient';
@@ -56,7 +56,7 @@ export default function PrescriptionScanner() {
     downloadAnchorNode.remove();
   };
 
-  // --- NEW: Print/Save PDF Function ---
+  // --- Print/Save PDF Function ---
   const handlePrint = () => {
     window.print();
   };
@@ -64,7 +64,7 @@ export default function PrescriptionScanner() {
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto', fontFamily: 'sans-serif', padding: '20px', position: 'relative' }}>
       
-      {/* --- NEW: CSS for clean printing. Hides buttons and UI elements when saving as PDF --- */}
+      {/* CSS for clean printing */}
       <style>
         {`
           @media print {
@@ -147,6 +147,42 @@ export default function PrescriptionScanner() {
                           <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>{results.meta_evaluation.corrected_accuracy_score}/100</div>
                         </div>
                       </div>
+
+                      {/* --- NEW: Detailed Auditor Deduction Report --- */}
+                      <div style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
+                        <h4 style={{ margin: '0 0 10px 0', color: '#1e293b', borderBottom: '1px solid #e2e8f0', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          📋 Auditor's Deduction Report
+                        </h4>
+                        <p style={{ margin: '0 0 10px 0', color: '#334155', lineHeight: '1.6', backgroundColor: '#f8fafc', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #3b82f6' }}>
+                          {results.meta_evaluation.audit_summary}
+                        </p>
+                        
+                        {/* Dimension Scores Breakdown */}
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                           <span style={{ fontSize: '12px', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', color: '#475569' }}>Medication: <strong>{results.meta_evaluation.dimension_scores?.medication_validation ?? 0}/25</strong></span>
+                           <span style={{ fontSize: '12px', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', color: '#475569' }}>Structure: <strong>{results.meta_evaluation.dimension_scores?.structural_integrity ?? 0}/25</strong></span>
+                           <span style={{ fontSize: '12px', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', color: '#475569' }}>Completeness: <strong>{results.meta_evaluation.dimension_scores?.completeness ?? 0}/25</strong></span>
+                           <span style={{ fontSize: '12px', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', color: '#475569' }}>Calibration: <strong>{results.meta_evaluation.dimension_scores?.judge_calibration ?? 0}/25</strong></span>
+                        </div>
+
+                        {results.meta_evaluation.false_positives?.length > 0 && (
+                          <div style={{ marginTop: '10px' }}>
+                            <strong style={{ color: '#ea580c' }}>⚠️ False Positives (Judge 1 hallucinated an error):</strong>
+                            <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
+                              {results.meta_evaluation.false_positives.map((fp, i) => <li key={i}>{fp}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {results.meta_evaluation.false_negatives?.length > 0 && (
+                          <div style={{ marginTop: '10px' }}>
+                            <strong style={{ color: '#dc2626' }}>🚨 False Negatives (Judge 1 missed a real error):</strong>
+                            <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
+                              {results.meta_evaluation.false_negatives.map((fn, i) => <li key={i}>{fn}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+
                     </div>
                   )}
 
@@ -163,7 +199,7 @@ export default function PrescriptionScanner() {
               {/* Comprehensive Extracted Data Panel */}
               <div className="print-clean" style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
                 
-                {/* --- NEW: Export Action Row --- */}
+                {/* Export Action Row */}
                 <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
                   <h2 style={{ margin: '0', color: '#333' }}>Digitized Patient Record</h2>
                   <div style={{ display: 'flex', gap: '10px' }}>
