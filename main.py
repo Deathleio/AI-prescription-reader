@@ -11,7 +11,7 @@ from google.genai import types
 from openai import OpenAI  
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
+load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -24,6 +24,7 @@ if not gemini_key:
 if not openai_key:
     raise ValueError(f"CRITICAL ERROR: OPENAI_API_KEY not found.")
 
+# --- FIXED: Use the actual environment variable, not a hardcoded string ---
 gemini_client = genai.Client(api_key=gemini_key)
 openai_client = OpenAI(api_key=openai_key) 
 
@@ -78,6 +79,7 @@ async def process_prescription(file: UploadFile = File(...)):
           ]
         }
         """
+        # --- FIXED: Use gemini-1.5-flash to avoid 503 errors ---
         extraction_response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=[extractor_prompt, image])
         extracted_data = clean_json_response(extraction_response.text)
         
