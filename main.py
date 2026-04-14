@@ -1,30 +1,36 @@
 import os
 import json
+import time # <-- NEW: We need this to make Python pause
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 
 from google import genai
 from google.genai import types
 from openai import OpenAI  
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+env_path = os.path.join(BASE_DIR, ".env")
+
+load_dotenv(env_path, override=True)
+env_dict = dotenv_values(env_path)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-gemini_key = os.environ.get("GEMINI_API_KEY")
-openai_key = os.environ.get("OPENAI_API_KEY") 
+gemini_key = env_dict.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
+openai_key = env_dict.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY"))
 
 if not gemini_key:
     raise ValueError(f"CRITICAL ERROR: GEMINI_API_KEY not found.")
 if not openai_key:
     raise ValueError(f"CRITICAL ERROR: OPENAI_API_KEY not found.")
 
-# --- FIXED: Use the actual environment variable, not a hardcoded string ---
+gemini_key = gemini_key.strip()
+openai_key = openai_key.strip()
+
 gemini_client = genai.Client(api_key=gemini_key)
 openai_client = OpenAI(api_key=openai_key) 
 
@@ -79,8 +85,25 @@ async def process_prescription(file: UploadFile = File(...)):
           ]
         }
         """
-        # --- FIXED: Use gemini-1.5-flash to avoid 503 errors ---
-        extraction_response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=[extractor_prompt, image])
+        
+        # --- NEW: Smart Retry Loop for Extraction ---
+        max_retries = 3
+        extraction_response = None
+        
+        for attempt in range(max_retries):
+            try:
+                extraction_response = gemini_client.models.generate_content(
+                    model='gemini-2.5-flash', 
+                    contents=[extractor_prompt, image]
+                )
+                break # It worked! Break out of the loop
+            except Exception as e:
+                if "503" in str(e) and attempt < max_retries - 1:
+                    print(f"⚠️ Google Servers busy (Extraction). Retrying in 2s... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(2) # Wait 2 seconds
+                else:
+                    raise e # If it's not a 503 or we are out of retries, crash.
+
         extracted_data = clean_json_response(extraction_response.text)
         
         if "error" in extracted_data:
@@ -107,7 +130,23 @@ async def process_prescription(file: UploadFile = File(...)):
           "summary": ["Concise point 1 focusing on OCR/Extraction quality...", "Concise point 2..."]
         }}
         """
-        eval_response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=evaluator_prompt)
+        
+        # --- NEW: Smart Retry Loop for Level 1 Judgement ---
+        eval_response = None
+        for attempt in range(max_retries):
+            try:
+                eval_response = gemini_client.models.generate_content(
+                    model='gemini-2.5-flash', 
+                    contents=evaluator_prompt
+                )
+                break
+            except Exception as e:
+                if "503" in str(e) and attempt < max_retries - 1:
+                    print(f"⚠️ Google Servers busy (Level 1). Retrying in 2s... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(2)
+                else:
+                    raise e
+
         evaluation_data = clean_json_response(eval_response.text)
 
         # --- 3. META-EVALUATION PHASE (Level 2 Judgement) ---
@@ -165,4 +204,9 @@ async def process_prescription(file: UploadFile = File(...)):
         error_str = str(e)
         if "429" in error_str or "Quota exceeded" in error_str:
             raise HTTPException(status_code=429, detail="API cooling down. Please wait 60 seconds and try again!")
+        
+        # We also need to send a cleaner error to the frontend if it fails all 3 times
+        if "503" in error_str:
+             raise HTTPException(status_code=503, detail="Google's AI servers are completely overloaded right now. Please try again in a few minutes.")
+             
         raise HTTPException(status_code=500, detail=error_str)
