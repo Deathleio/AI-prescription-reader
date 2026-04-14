@@ -55,6 +55,76 @@ export default function PrescriptionScanner() {
     downloadAnchorNode.remove();
   };
 
+  const handleDownloadCSV = () => {
+    if (!results || !results.extracted_data) return;
+    
+    const demo = results.extracted_data.patient_demographics || {};
+    const vitals = results.extracted_data.vitals_and_clinical_notes || {};
+    const meds = results.extracted_data.medications || [];
+    const eval1 = results.evaluation || {};
+    const eval2 = results.meta_evaluation || {};
+
+    // Helper to safely escape strings for CSV formats (handles commas and quotes inside text)
+    const escapeCSV = (value) => {
+      if (value === null || value === undefined) return '""';
+      const stringified = String(value);
+      return `"${stringified.replace(/"/g, '""')}"`;
+    };
+
+    // Format all medications into a single readable string for the row
+    const medsString = meds.map(m => 
+      `${m.drug_name || 'Unknown'} (${m.dosage || 'No dosage'}) - ${m.frequency_and_duration || 'No freq'}`
+    ).join(' | ');
+
+    // Comprehensive headers covering demographics, clinical info, and AI evaluations
+    const headers = [
+      "Filename", "Patient Name", "Age", "Gender", "Registration No", "Visit Date", "Doctor Name",
+      "Blood Pressure", "Pulse", "Chief Complaints", "Clinical Notes",
+      "Total Medications", "Medications Detail",
+      "L1 Accuracy Score", "Hallucinations Detected", "Structural Integrity",
+      "L2 Meta Score", "Corrected L2 Score", "False Positives Flagged", "False Negatives Missed"
+    ];
+    
+    // Map the extracted data to the headers
+    const rowData = [
+      escapeCSV(file?.name || 'prescription'),
+      escapeCSV(demo.name),
+      escapeCSV(demo.age),
+      escapeCSV(demo.gender),
+      escapeCSV(demo.registration_number),
+      escapeCSV(demo.visit_date),
+      escapeCSV(demo.doctor_name),
+      escapeCSV(vitals.blood_pressure),
+      escapeCSV(vitals.pulse),
+      escapeCSV((vitals.chief_complaints || []).join(', ')),
+      escapeCSV(vitals.other_notes),
+      meds.length,
+      escapeCSV(medsString),
+      escapeCSV(eval1.accuracy_score),
+      escapeCSV(eval1.hallucination_detected ? 'Yes' : 'No'),
+      escapeCSV(eval1.structural_integrity_good ? 'Yes' : 'No'),
+      escapeCSV(eval2.meta_score),
+      escapeCSV(eval2.corrected_accuracy_score),
+      escapeCSV((eval2.false_positives || []).join('; ')),
+      escapeCSV((eval2.false_negatives || []).join('; '))
+    ];
+
+    const csvContent = [headers.join(","), rowData.join(",")].join("\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.setAttribute('hidden', '');
+    a.setAttribute('href', url);
+    
+    const safeName = (demo.name || "Unknown_Patient").replace(/\s+/g, '_');
+    a.setAttribute('download', `detailed_audit_report_${safeName}.csv`);
+    
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const handlePrint = () => window.print();
 
   return (
@@ -97,7 +167,6 @@ export default function PrescriptionScanner() {
               {!isCustomerMode && (
                 <div className="no-print">
                   
-                  {/* --- NEW: Intuitive Level 1 Judgement Panel --- */}
                   <div style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '8px', marginBottom: '20px', border: `1px solid #cdd4e0`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '10px' }}>
                       <h3 style={{ margin: '0', color: '#1e293b' }}>Level 1 Data QA</h3>
@@ -106,7 +175,6 @@ export default function PrescriptionScanner() {
                       </div>
                     </div>
 
-                    {/* Boolean Flags UI */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '15px' }}>
                       <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
                         <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Hallucinations</div>
@@ -128,7 +196,6 @@ export default function PrescriptionScanner() {
                       </div>
                     </div>
 
-                    {/* Summary Bullet Points */}
                     <div style={{ color: '#334155', fontSize: '13px' }}>
                       <strong style={{ display: 'block', marginBottom: '4px', color: '#475569' }}>QA Notes:</strong>
                       {Array.isArray(results.evaluation.summary) ? (
@@ -141,7 +208,6 @@ export default function PrescriptionScanner() {
                     </div>
                   </div>
 
-                  {/* Level 2 Meta-Evaluation Dashboard */}
                   {results.meta_evaluation && (
                     <div style={{ backgroundColor: '#f0f4f8', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #cdd4e0' }}>
                       <h3 style={{ margin: '0 0 15px 0', color: '#1a365d', borderBottom: '2px solid #cbd5e1', paddingBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -199,11 +265,11 @@ export default function PrescriptionScanner() {
                 </div>
               )}
 
-              {/* Comprehensive Extracted Data Panel */}
               <div className="print-clean" style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
                 <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
                   <h2 style={{ margin: '0', color: '#333' }}>Digitized Patient Record</h2>
                   <div style={{ display: 'flex', gap: '10px' }}>
+                    <button onClick={handleDownloadCSV} style={{ padding: '6px 12px', backgroundColor: '#0ea5e9', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>📊 CSV</button>
                     <button onClick={handleDownloadJSON} style={{ padding: '6px 12px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>⬇️ JSON</button>
                     <button onClick={handlePrint} style={{ padding: '6px 12px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>🖨️ Save PDF</button>
                   </div>

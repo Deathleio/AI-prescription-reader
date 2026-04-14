@@ -47,25 +47,27 @@ async def process_prescription(file: UploadFile = File(...)):
         file_bytes = await file.read()
         image = Image.open(io.BytesIO(file_bytes))
         
-        # --- 1. EXTRACTION PHASE ---
+  # --- 1. EXTRACTION PHASE ---
         extractor_prompt = """
         You are an expert medical transcription AI processing an Indian Government Hospital OPD Patient Card. 
         Extract ALL available information from the image into the strict JSON schema below. 
         
-        CRITICAL RULES:
-        1. Look at the printed header for hospital details and patient demographics.
-        2. Look for stamped or handwritten dates in the 'Visit No:' boxes indicating previous or subsequent visits.
-        3. Look at the 'Clinical Notes' column (usually left) for vitals (BP, P for pulse), chief complaints, and past lab results.
-        4. Look at the 'Advice' column (usually right) for Lab Investigations ordered.
-        5. Look at the 'Advice' or 'Adv' section for medications. YOU MUST EXTRACT EVERY SINGLE MEDICATION LISTED. Read carefully from the top of the list all the way to the very bottom of the page. Do not stop early.
-        6. NO SHORTHAND OR ABBREVIATIONS: You MUST expand all medical shorthand, acronyms, and abbreviations into their full, complete English words.
-           - Complaints: 'DM' -> 'Diabetes Mellitus', 'CVA' -> 'Cerebrovascular Accident', 'HTN' -> 'Hypertension'.
-           - Forms: 'Tab' -> 'Tablet', 'Cap' -> 'Capsule', 'Syr' -> 'Syrup', 'Inj' -> 'Injection'.
-           - Frequencies: 'OD' -> 'Once daily', 'BD' -> 'Twice daily', 'TDS' -> 'Three times daily', 'BBF' -> 'Before Breakfast', 'HS' -> 'At bedtime'.
-        7. Output ONLY raw JSON. Do not include markdown formatting.
+        CRITICAL RULES FOR READING HANDWRITING:
+        1. USE THE SCRATCHPAD: You MUST use the 'raw_transcription_scratchpad' field first to literally type out every handwritten word you see, exactly as written, before mapping it to the other fields. This helps you read messy handwriting accurately.
+        2. GYNAECOLOGY & MATERNITY CONTEXT: 
+           - 'LMP' means Last Menstrual Period (e.g., "LMP 26/10/25"). Put this in 'vitals_and_clinical_notes'. Do NOT treat it as a visit date.
+           - 'P' followed by numbers (e.g., 'P0+0', 'P1') means Parity (pregnancies), NOT Pulse. 
+           - 'G' means Gravida.
+           - 'USG' means Ultrasonography (e.g., 'USG for FPP', 'USG lower abd', 'USG W/A').
+           - Common maternal meds: 'IFA' (Iron Folic Acid), 'Calcium', 'Folvite', etc.
+        3. Look at the 'Clinical Notes' column (usually left) for maternal history (LMP, P0+0).
+        4. Look at the 'Advice' column (usually right) for Lab Investigations (like USG or blood tests) and Medications.
+        5. NO SHORTHAND: Expand acronyms (e.g., 'OD' -> 'Once daily', 'Tab' -> 'Tablet').
+        6. Output ONLY raw JSON. Do not include markdown formatting.
         
         REQUIRED SCHEMA:
         {
+          "raw_transcription_scratchpad": "string - Write out the literal handwriting you see here first, line by line.",
           "hospital_details": {"name": "string", "department": "string"},
           "patient_demographics": {"name": "string", "age": "string", "gender": "string", "registration_number": "string", "visit_date": "string", "recorded_visit_dates": ["string"], "doctor_name": "string"},
           "vitals_and_clinical_notes": {
