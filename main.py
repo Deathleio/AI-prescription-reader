@@ -47,7 +47,7 @@ async def process_prescription(file: UploadFile = File(...)):
         file_bytes = await file.read()
         image = Image.open(io.BytesIO(file_bytes))
         
-        # --- 1. EXTRACTION PHASE (GEMINI FLASH) ---
+# --- 1. EXTRACTION PHASE (GEMINI FLASH) ---
         extractor_prompt = """
         You are a world-class medical OCR system processing a messy Indian Government Hospital OPD Card. 
         Your absolute primary directive is 100% extraction without dropping a single word.
@@ -57,18 +57,22 @@ async def process_prescription(file: UploadFile = File(...)):
            - Look at the TOP for hospital/patient details.
            - Look at the LEFT margin for Clinical Notes (C/O, O/E, LMP, BP, Pulse).
            - Look at the RIGHT margin for Advice (Rx, Meds, Labs, USG).
-        2. GYNAECOLOGY & MATERNITY CONTEXT: 
+        2. NO GHOST MAPPING: Every single concept, test (like 'Ultrasound'), or medication you map into the final JSON MUST physically exist in your `raw_spatial_scratchpad` first. Do not map data that you skipped in the scratchpad phase.
+        3. MULTIPLE VISITS / REPEATED FIELDS: If the card shows a history of multiple visits, tokens, or doctors:
+           - Put the MOST RECENT visit details into the main `patient_demographics` fields.
+           - Log all previous visit dates into the `recorded_visit_dates` array.
+           - Dump any extra historical context (old doctors, old token numbers) into `vitals_and_clinical_notes.other_notes`.
+        4. GYNAECOLOGY & MATERNITY CONTEXT: 
            - 'LMP' = Last Menstrual Period. 'EDD' = Estimated Date of Delivery.
            - 'P0+0', 'G1 P1' = Parity/Gravida (maternal history), NOT Pulse.
-        3. INDIAN MEDICAL ABBREVIATIONS TO EXPAND: 
+        5. INDIAN MEDICAL ABBREVIATIONS TO EXPAND: 
            - C/O -> Complains of
            - O/E -> On examination
-           - H/O -> History of
            - BD / BID -> Twice daily
            - TDS / TID -> Thrice daily
            - OD -> Once daily
-           - SOS -> As needed
-        4. Do NOT map data until the scratchpad is completely filled.
+        6. CIRCLED NUMBERS & DURATIONS: Doctors draw circles around numbers to indicate days. If you see Unicode circled numbers (like ⑦, ⑳), DO NOT output the circle symbol. Translate it into text, e.g., "for 7 days".
+        7. DOSAGE GIBBERISH & QUANTITIES: If a messy scribble translates to OCR gibberish (like "m2.30", "@30", "x2.5"), act like a pharmacist and deduce the clinical meaning. For example, 'm2.30' next to a drug name is likely a misread '2.5mg' or '30 mg'. NEVER output raw, nonsensical OCR artifacts. If deduction is impossible, leave the dosage blank.
         
         REQUIRED SCHEMA (Return ONLY valid JSON matching this structure):
         {
@@ -79,12 +83,12 @@ async def process_prescription(file: UploadFile = File(...)):
              "bottom_section_signatures": ["string - literally transcribe the bottom lines"]
           },
           "hospital_details": {"name": "string", "department": "string"},
-          "patient_demographics": {"name": "string", "age": "string", "gender": "string", "registration_number": "string", "visit_date": "string", "recorded_visit_dates": ["string"], "doctor_name": "string"},
+          "patient_demographics": {"name": "string", "age": "string", "gender": "string", "registration_number": "string", "visit_date": "string - LATEST ONLY", "recorded_visit_dates": ["string - ALL PAST DATES"], "doctor_name": "string"},
           "vitals_and_clinical_notes": {
               "blood_pressure": "string", 
               "pulse": "string", 
               "chief_complaints": ["string - USE FULL EXPANDED WORDS"], 
-              "other_notes": "string - Capture any scribbles, maternal history, or measurements here."
+              "other_notes": "string - Capture any scribbles, past visit tokens/details, or maternal history here."
           },
           "lab_investigations_ordered": ["string - FULL TEST NAMES"],
           "medications": [
@@ -143,7 +147,8 @@ async def process_prescription(file: UploadFile = File(...)):
         - Deduct 10 points for failure to expand acronyms (e.g., leaving 'OD' instead of 'Once daily' or 'C/O' instead of 'Complains of').
         - Deduct 5 points for obvious typos or weird OCR artifacts.
         
-        TASK: Output specific boolean flags, calculate the final score, and provide a detailed bulleted explanation of the score.
+        TASK: Output specific boolean flags, calculate the final score, and provide a detailed, highly user-friendly bulleted explanation in the `summary` array. 
+        FOR EVERY DEDUCTION, you MUST explain exactly WHAT the mistake was and WHERE it occurred.
         
         Return ONLY a JSON object exactly matching this schema:
         {{
@@ -151,12 +156,12 @@ async def process_prescription(file: UploadFile = File(...)):
           "hallucination_detected": <boolean>,
           "structural_integrity_good": <boolean>,
           "all_text_extracted": <boolean>,
-          "bulleted_score_explanation": [
-             "- 🟢 Base score: 100/100",
-             "- 🔴 -20 points: Structural failure. The USG scan was placed in medications instead of lab_investigations_ordered.",
-             "- 🔴 -10 points: Acronym failure. 'BD' was not expanded to 'Twice daily'.",
-             "- 🟢 No hallucinations detected.",
-             "- 📝 Final Score: 70/100"
+          "summary": [
+             "🟢 **Base score: 100/100**",
+             "🔴 **-20 points (Structural Error):** In the 'medications' array, the AI incorrectly listed 'USG Whole Abdomen' which is a scan, not a medication. It should be in 'lab_investigations_ordered'.",
+             "🔴 **-20 points (Missing Text):** The spatial scratchpad contained the clinical note 'severe fever for 3 days', but the AI completely failed to map this into the 'vitals_and_clinical_notes' field.",
+             "🔴 **-10 points (Acronym Failure):** In the medication frequency for Paracetamol, the AI left 'BD' instead of properly expanding it to 'Twice daily'.",
+             "📝 **Final QA Score: 50/100**"
           ]
         }}
         """
@@ -168,7 +173,7 @@ async def process_prescription(file: UploadFile = File(...)):
                     model="gpt-4o", 
                     response_format={ "type": "json_object" }, 
                     messages=[
-                        {"role": "system", "content": "You are a precise JSON-only medical auditor."}, 
+                        {"role": "system", "content": "You are a precise JSON-only medical auditor. Be explicitly detailed about where mistakes occurred."}, 
                         {"role": "user", "content": evaluator_prompt}
                     ]
                 )

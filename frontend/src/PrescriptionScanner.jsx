@@ -28,6 +28,7 @@ export default function PrescriptionScanner() {
       });
       
       const data = await response.json();
+      console.log("Raw API Response from Backend:", data); 
       
       if (!response.ok) {
           alert(`Notice: ${data.detail}`);
@@ -61,31 +62,25 @@ export default function PrescriptionScanner() {
     const demo = results.extracted_data.patient_demographics || {};
     const vitals = results.extracted_data.vitals_and_clinical_notes || {};
     const meds = results.extracted_data.medications || [];
-    const eval1 = results.evaluation || {};
-    const eval2 = results.meta_evaluation || {};
+    const evaluation = results.evaluation || {};
 
-    // Helper to safely escape strings for CSV formats (handles commas and quotes inside text)
     const escapeCSV = (value) => {
       if (value === null || value === undefined) return '""';
       const stringified = String(value);
       return `"${stringified.replace(/"/g, '""')}"`;
     };
 
-    // Format all medications into a single readable string for the row
     const medsString = meds.map(m => 
       `${m.drug_name || 'Unknown'} (${m.dosage || 'No dosage'}) - ${m.frequency_and_duration || 'No freq'}`
     ).join(' | ');
 
-    // Comprehensive headers covering demographics, clinical info, and AI evaluations
     const headers = [
       "Filename", "Patient Name", "Age", "Gender", "Registration No", "Visit Date", "Doctor Name",
       "Blood Pressure", "Pulse", "Chief Complaints", "Clinical Notes",
       "Total Medications", "Medications Detail",
-      "L1 Accuracy Score", "Hallucinations Detected", "Structural Integrity",
-      "L2 Meta Score", "Corrected L2 Score", "False Positives Flagged", "False Negatives Missed"
+      "Accuracy Score", "Hallucinations Detected", "Structural Integrity", "All Text Extracted"
     ];
     
-    // Map the extracted data to the headers
     const rowData = [
       escapeCSV(file?.name || 'prescription'),
       escapeCSV(demo.name),
@@ -100,13 +95,10 @@ export default function PrescriptionScanner() {
       escapeCSV(vitals.other_notes),
       meds.length,
       escapeCSV(medsString),
-      escapeCSV(eval1.accuracy_score),
-      escapeCSV(eval1.hallucination_detected ? 'Yes' : 'No'),
-      escapeCSV(eval1.structural_integrity_good ? 'Yes' : 'No'),
-      escapeCSV(eval2.meta_score),
-      escapeCSV(eval2.corrected_accuracy_score),
-      escapeCSV((eval2.false_positives || []).join('; ')),
-      escapeCSV((eval2.false_negatives || []).join('; '))
+      escapeCSV(evaluation.accuracy_score),
+      escapeCSV(evaluation.hallucination_detected ? 'Yes' : 'No'),
+      escapeCSV(evaluation.structural_integrity_good ? 'Yes' : 'No'),
+      escapeCSV(evaluation.all_text_extracted ? 'Yes' : 'No')
     ];
 
     const csvContent = [headers.join(","), rowData.join(",")].join("\n");
@@ -126,6 +118,15 @@ export default function PrescriptionScanner() {
   };
 
   const handlePrint = () => window.print();
+
+  // NEW HELPER: Converts markdown **bold** to HTML <strong> elements
+  const formatMarkdownBold = (text) => {
+    if (typeof text !== 'string') return text;
+    const parts = text.split(/\*\*(.*?)\*\*/g);
+    return parts.map((part, index) => 
+      index % 2 === 1 ? <strong key={index} style={{ color: '#1e293b' }}>{part}</strong> : part
+    );
+  };
 
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto', fontFamily: 'sans-serif', padding: '20px', position: 'relative' }}>
@@ -169,7 +170,7 @@ export default function PrescriptionScanner() {
                   
                   <div style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '8px', marginBottom: '20px', border: `1px solid #cdd4e0`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '10px' }}>
-                      <h3 style={{ margin: '0', color: '#1e293b' }}>Level 1 Data QA</h3>
+                      <h3 style={{ margin: '0', color: '#1e293b' }}>Quality Assurance Report</h3>
                       <div style={{ fontSize: '18px', fontWeight: 'bold', color: results.evaluation.accuracy_score >= 80 ? '#059669' : '#dc2626', backgroundColor: results.evaluation.accuracy_score >= 80 ? '#d1fae5' : '#fee2e2', padding: '4px 12px', borderRadius: '20px' }}>
                         Score: {results.evaluation.accuracy_score}/100
                       </div>
@@ -197,71 +198,29 @@ export default function PrescriptionScanner() {
                     </div>
 
                     <div style={{ color: '#334155', fontSize: '13px' }}>
-                      <strong style={{ display: 'block', marginBottom: '4px', color: '#475569' }}>QA Notes:</strong>
-                      {Array.isArray(results.evaluation.summary) ? (
-                        <ul style={{ margin: '0', paddingLeft: '20px', lineHeight: '1.5' }}>
-                          {results.evaluation.summary.map((point, index) => <li key={index}>{point}</li>)}
-                        </ul>
-                      ) : (
-                        <span>{results.evaluation.summary}</span>
-                      )}
+                      <strong style={{ display: 'block', marginBottom: '8px', color: '#475569', fontSize: '14px' }}>Detailed QA Audit:</strong>
+                      {(() => {
+                        const notesData = 
+                          results.evaluation.summary || 
+                          results.evaluation.bulleted_score_explanation || 
+                          results.evaluation.deductions_log || 
+                          results.evaluation.qa_notes;
+
+                        if (Array.isArray(notesData) && notesData.length > 0) {
+                          return (
+                            <ul style={{ margin: '0', paddingLeft: '20px', lineHeight: '1.6' }}>
+                              {/* Apply the formatMarkdownBold function here */}
+                              {notesData.map((point, index) => <li key={index} style={{ marginBottom: '6px' }}>{formatMarkdownBold(point)}</li>)}
+                            </ul>
+                          );
+                        } else if (typeof notesData === 'string' && notesData.trim() !== '') {
+                          return <span>{formatMarkdownBold(notesData)}</span>;
+                        } else {
+                          return <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No notes provided. Open DevTools (F12) to check raw JSON.</span>;
+                        }
+                      })()}
                     </div>
                   </div>
-
-                  {results.meta_evaluation && (
-                    <div style={{ backgroundColor: '#f0f4f8', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #cdd4e0' }}>
-                      <h3 style={{ margin: '0 0 15px 0', color: '#1a365d', borderBottom: '2px solid #cbd5e1', paddingBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>⚖️ Level 2 Judgement</span>
-                        <span style={{ fontSize: '14px', padding: '4px 10px', borderRadius: '15px', backgroundColor: results.meta_evaluation.judge_1_agreement ? '#d1fae5' : '#fee2e2', color: results.meta_evaluation.judge_1_agreement ? '#065f46' : '#991b1b' }}>
-                          Agreement: {results.meta_evaluation.judge_1_agreement ? "✅ YES" : "❌ NO"}
-                        </span>
-                      </h3>
-                      
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-                        <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                          <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Level 2 Grade of Level 1</div>
-                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: results.meta_evaluation.meta_score >= 80 ? '#059669' : '#dc2626' }}>{results.meta_evaluation.meta_score}/100</div>
-                        </div>
-                        <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                          <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Corrected Quality Score</div>
-                          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>{results.meta_evaluation.corrected_accuracy_score}/100</div>
-                        </div>
-                      </div>
-
-                      <div style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
-                        <h4 style={{ margin: '0 0 10px 0', color: '#1e293b', borderBottom: '1px solid #e2e8f0', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          📋 Level 2 Deduction Report
-                        </h4>
-                        <p style={{ margin: '0 0 10px 0', color: '#334155', lineHeight: '1.6', backgroundColor: '#f8fafc', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #3b82f6' }}>
-                          {results.meta_evaluation.audit_summary}
-                        </p>
-                        
-                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                           <span style={{ fontSize: '12px', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', color: '#475569' }}>Extraction: <strong>{results.meta_evaluation.dimension_scores?.extraction_accuracy ?? 0}/25</strong></span>
-                           <span style={{ fontSize: '12px', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', color: '#475569' }}>Structure: <strong>{results.meta_evaluation.dimension_scores?.structural_integrity ?? 0}/25</strong></span>
-                           <span style={{ fontSize: '12px', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', color: '#475569' }}>Completeness: <strong>{results.meta_evaluation.dimension_scores?.completeness ?? 0}/25</strong></span>
-                           <span style={{ fontSize: '12px', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', color: '#475569' }}>Calibration: <strong>{results.meta_evaluation.dimension_scores?.judge_calibration ?? 0}/25</strong></span>
-                        </div>
-
-                        {results.meta_evaluation.false_positives?.length > 0 && (
-                          <div style={{ marginTop: '10px' }}>
-                            <strong style={{ color: '#ea580c' }}>⚠️ False Positives (Level 1 incorrectly flagged an error):</strong>
-                            <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
-                              {results.meta_evaluation.false_positives.map((fp, i) => <li key={i}>{fp}</li>)}
-                            </ul>
-                          </div>
-                        )}
-                        {results.meta_evaluation.false_negatives?.length > 0 && (
-                          <div style={{ marginTop: '10px' }}>
-                            <strong style={{ color: '#dc2626' }}>🚨 False Negatives (Level 1 missed a real error):</strong>
-                            <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', color: '#475569' }}>
-                              {results.meta_evaluation.false_negatives.map((fn, i) => <li key={i}>{fn}</li>)}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
 
