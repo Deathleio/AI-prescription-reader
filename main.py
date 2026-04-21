@@ -47,7 +47,7 @@ async def process_prescription(file: UploadFile = File(...)):
         file_bytes = await file.read()
         image = Image.open(io.BytesIO(file_bytes))
         
-# --- 1. EXTRACTION PHASE (GEMINI FLASH) ---
+        # --- 1. EXTRACTION PHASE (GEMINI FLASH) ---
         extractor_prompt = """
         You are a world-class medical OCR system processing a messy Indian Government Hospital OPD Card. 
         Your absolute primary directive is 100% extraction without dropping a single word.
@@ -55,24 +55,34 @@ async def process_prescription(file: UploadFile = File(...)):
         CRITICAL RULES FOR EXTRACTION:
         1. SPATIAL ZONING SCRATCHPAD: Indian OPD cards have a standard layout. You MUST use the `raw_spatial_scratchpad` to transcribe the document block-by-block. 
            - Look at the TOP for hospital/patient details.
-           - Look at the LEFT margin for Clinical Notes (C/O, O/E, LMP, BP, Pulse).
+           - Look at the LEFT margin for Clinical Notes.
            - Look at the RIGHT margin for Advice (Rx, Meds, Labs, USG).
-        2. NO GHOST MAPPING: Every single concept, test (like 'Ultrasound'), or medication you map into the final JSON MUST physically exist in your `raw_spatial_scratchpad` first. Do not map data that you skipped in the scratchpad phase.
-        3. MULTIPLE VISITS / REPEATED FIELDS: If the card shows a history of multiple visits, tokens, or doctors:
+        2. NO GHOST MAPPING: Every single concept, test, or medication you map into the final JSON MUST physically exist in your `raw_spatial_scratchpad` first.
+        3. MULTIPLE VISITS / REPEATED FIELDS: If the card shows a history of multiple visits:
            - Put the MOST RECENT visit details into the main `patient_demographics` fields.
            - Log all previous visit dates into the `recorded_visit_dates` array.
-           - Dump any extra historical context (old doctors, old token numbers) into `vitals_and_clinical_notes.other_notes`.
-        4. GYNAECOLOGY & MATERNITY CONTEXT: 
-           - 'LMP' = Last Menstrual Period. 'EDD' = Estimated Date of Delivery.
-           - 'P0+0', 'G1 P1' = Parity/Gravida (maternal history), NOT Pulse.
-        5. INDIAN MEDICAL ABBREVIATIONS TO EXPAND: 
-           - C/O -> Complains of
-           - O/E -> On examination
-           - BD / BID -> Twice daily
-           - TDS / TID -> Thrice daily
-           - OD -> Once daily
-        6. CIRCLED NUMBERS & DURATIONS: Doctors draw circles around numbers to indicate days. If you see Unicode circled numbers (like ⑦, ⑳), DO NOT output the circle symbol. Translate it into text, e.g., "for 7 days".
-        7. DOSAGE GIBBERISH & QUANTITIES: If a messy scribble translates to OCR gibberish (like "m2.30", "@30", "x2.5"), act like a pharmacist and deduce the clinical meaning. For example, 'm2.30' next to a drug name is likely a misread '2.5mg' or '30 mg'. NEVER output raw, nonsensical OCR artifacts. If deduction is impossible, leave the dosage blank.
+        4. INDIAN MEDICAL ABBREVIATIONS TO EXPAND: 
+           - C/O -> Complains of | O/E -> On examination | H/O -> History of | F/U/C -> Follow-up case
+           - QDS -> Four times daily | TDS/TID -> Thrice daily | BD/BID -> Twice daily | OD -> Once daily
+           - AC -> Before meals | PC -> After meals | HS -> At bedtime
+           - BBF -> Before Breakfast | ABF -> After Breakfast
+           - BDN -> Before Dinner | ADN -> After Dinner
+        5. DASH / HYPHEN DOSAGE NOTATIONS (e.g., 1-x-1, 1-0-1, 1-2): 
+           - These strictly dictate Morning-Afternoon-Night pill counts. 
+           - '1-x-1' or '1-0-1' means 1 in the morning, 0 in the afternoon, 1 at night/evening. 
+           - '1-2' means 1 in the morning, 2 in the evening/night. 
+           - You MUST completely translate these into plain English (e.g., "1 tablet in the morning and 2 tablets in the evening"). NEVER output the raw dashes like '1-2' in the final mapped dosage.
+        6. FORCED EXTRACTION (NO ILLEGIBLE TAGS): You are FORBIDDEN from using the word "[Illegible]" or leaving a field blank just because the handwriting is messy. You MUST force a transcription based on phonetic shapes and your clinical context. Make your absolute best guess.
+        7. AVOID INSTRUCTION BLEED (CRITICAL): 
+           - DO NOT assume or guess meal timings. 
+           - If a specific medication does not have explicit meal instructions (like 'AC', 'PC', or 'after food') written directly next to it, leave `special_instructions` STRICTLY BLANK. 
+           - DO NOT carry over or steal instructions from the medication written above or below it.
+        8. DOSAGE FRACTIONS & BLANKS: 
+           - Explicitly look for fractions (e.g., '1/2 tab'). Do not default to 1.
+           - If a drug name has NO dosage/instructions written next to it, leave the frequency/duration blank.
+        9. CIRCLED NUMBERS & GIBBERISH:
+           - Circled numbers (⑦, ⑳) mean days (e.g., "for 7 days").
+           - If a scribble translates to OCR gibberish (like "m2.30"), deduce clinical meaning ("2.5mg" or "30mg").
         
         REQUIRED SCHEMA (Return ONLY valid JSON matching this structure):
         {
@@ -90,13 +100,13 @@ async def process_prescription(file: UploadFile = File(...)):
               "chief_complaints": ["string - USE FULL EXPANDED WORDS"], 
               "other_notes": "string - Capture any scribbles, past visit tokens/details, or maternal history here."
           },
-          "lab_investigations_ordered": ["string - FULL TEST NAMES"],
+          "lab_investigations_prescribed": ["string - FULL TEST NAMES"],
           "medications": [
               {
                   "drug_name": "string - FULL PHARMACEUTICAL NAME", 
                   "dosage": "string", 
-                  "frequency_and_duration": "string - FULLY EXPANDED TEXT", 
-                  "special_instructions": "string - FULLY EXPANDED TEXT"
+                  "frequency_and_duration": "string - FULLY EXPANDED TEXT (e.g., '1 in the morning and 2 in the evening')", 
+                  "special_instructions": "string - FULLY EXPANDED TEXT (e.g., 'Before breakfast')"
               }
           ]
         }
@@ -117,12 +127,22 @@ async def process_prescription(file: UploadFile = File(...)):
                 break 
             except Exception as e:
                 error_str = str(e).lower()
-                if ("429" in error_str or "quota" in error_str) and attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 15 
-                    time.sleep(wait_time)
-                elif "503" in error_str and attempt < max_retries - 1:
-                    time.sleep(2)
+                is_rate_limit = any(err in error_str for err in ["429", "quota", "exhausted"])
+                is_server_overload = any(err in error_str for err in ["500", "502", "503", "504", "overloaded", "unavailable", "bad gateway"])
+
+                if attempt < max_retries - 1:
+                    if is_rate_limit:
+                        wait_time = (attempt + 1) * 15
+                        print(f"⏳ Extraction Rate Limit. Retrying in {wait_time}s... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                    elif is_server_overload:
+                        wait_time = (attempt + 1) * 5
+                        print(f"⚠️ Extraction Server Overload. Retrying in {wait_time}s... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                    else:
+                        raise e 
                 else:
+                    print("❌ Extraction Failed: Max retries exhausted.")
                     raise e 
 
         extracted_data = clean_json_response(extraction_response.text)
@@ -158,7 +178,7 @@ async def process_prescription(file: UploadFile = File(...)):
           "all_text_extracted": <boolean>,
           "summary": [
              "🟢 **Base score: 100/100**",
-             "🔴 **-20 points (Structural Error):** In the 'medications' array, the AI incorrectly listed 'USG Whole Abdomen' which is a scan, not a medication. It should be in 'lab_investigations_ordered'.",
+             "🔴 **-20 points (Structural Error):** In the 'medications' array, the AI incorrectly listed 'USG Whole Abdomen' which is a scan, not a medication. It should be in 'lab_investigations_prescribed'.",
              "🔴 **-20 points (Missing Text):** The spatial scratchpad contained the clinical note 'severe fever for 3 days', but the AI completely failed to map this into the 'vitals_and_clinical_notes' field.",
              "🔴 **-10 points (Acronym Failure):** In the medication frequency for Paracetamol, the AI left 'BD' instead of properly expanding it to 'Twice daily'.",
              "📝 **Final QA Score: 50/100**"
@@ -180,12 +200,22 @@ async def process_prescription(file: UploadFile = File(...)):
                 break
             except Exception as e:
                 error_str = str(e).lower()
-                if ("429" in error_str or "rate limit" in error_str) and attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 5
-                    time.sleep(wait_time)
-                elif "503" in error_str and attempt < max_retries - 1:
-                    time.sleep(2)
+                is_rate_limit = any(err in error_str for err in ["429", "quota", "exhausted", "rate limit"])
+                is_server_overload = any(err in error_str for err in ["500", "502", "503", "504", "overloaded", "unavailable", "bad gateway"])
+
+                if attempt < max_retries - 1:
+                    if is_rate_limit:
+                        wait_time = (attempt + 1) * 5
+                        print(f"⏳ Evaluation Rate Limit. Retrying in {wait_time}s... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                    elif is_server_overload:
+                        wait_time = (attempt + 1) * 5 
+                        print(f"⚠️ Evaluation Server Overload. Retrying in {wait_time}s... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                    else:
+                        raise e
                 else:
+                    print("❌ Evaluation Failed: Max retries exhausted.")
                     raise e
 
         # Safely parse the response from OpenAI
@@ -199,10 +229,10 @@ async def process_prescription(file: UploadFile = File(...)):
 
     except Exception as e:
         error_str = str(e)
-        if "429" in error_str or "Quota exceeded" in error_str:
+        if "429" in error_str or "quota" in error_str.lower() or "exhausted" in error_str.lower():
             raise HTTPException(status_code=429, detail="API Limits Exhausted even after retries. Please wait a few minutes and try again.")
         
-        if "503" in error_str:
-             raise HTTPException(status_code=503, detail="AI servers are completely overloaded right now. Please try again in a few minutes.")
+        if any(err in error_str.lower() for err in ["500", "502", "503", "504", "overloaded", "unavailable"]):
+             raise HTTPException(status_code=503, detail="AI servers are completely overloaded right now. We attempted to retry multiple times but the connection failed. Please wait a moment and try again.")
              
         raise HTTPException(status_code=500, detail=error_str)
