@@ -54,51 +54,69 @@ async def process_prescription(file: UploadFile = File(...)):
         
         CRITICAL RULES FOR EXTRACTION:
         1. SPATIAL ZONING SCRATCHPAD: Indian OPD cards have a standard layout. You MUST use the `raw_spatial_scratchpad` to transcribe the document block-by-block. 
-           - Look at the TOP for hospital/patient details.
+           - Look at the TOP for hospital details, primary patient demographics, Token No, and Room No.
+           - Look at the MIDDLE TABULAR GRID specifically for previous visit dates and visit numbers (e.g., 'Visit No: 2', 'Visit Date: Tm.').
            - Look at the LEFT margin for Clinical Notes.
            - Look at the RIGHT margin for Advice (Rx, Meds, Labs, USG).
         2. NO GHOST MAPPING: Every single concept, test, or medication you map into the final JSON MUST physically exist in your `raw_spatial_scratchpad` first.
-        3. MULTIPLE VISITS / REPEATED FIELDS: If the card shows a history of multiple visits:
-           - Put the MOST RECENT visit details into the main `patient_demographics` fields.
-           - Log all previous visit dates into the `recorded_visit_dates` array.
-        4. INDIAN MEDICAL ABBREVIATIONS TO EXPAND: 
-           - C/O -> Complains of | O/E -> On examination | H/O -> History of | F/U/C -> Follow-up case
-           - QDS -> Four times daily | TDS/TID -> Thrice daily | BD/BID -> Twice daily | OD -> Once daily
+        3. MUTUALLY EXCLUSIVE MAPPING: Once a piece of text from the scratchpad is mapped to a specific JSON field (e.g., chief_complaints), it MUST NOT be duplicated in another field (e.g., other_notes). Do not mix administrative details into clinical notes.
+        4. MULTIPLE VISITS: Put the MOST RECENT visit details into the main `patient_demographics` fields. Log ALL previous visit dates found in the tabular grid into the `recorded_visit_dates` array.
+        5. INDIAN MEDICAL ABBREVIATIONS TO EXPAND: 
+           - C/O or c/o -> Complains of | O/E -> On examination | H/O -> History of | F/U/C -> Follow-up case | Rxy or Rx -> Prescription
+           - QDS -> Four times daily | TDS/TID -> Thrice daily | BD/BID -> Twice daily | OD/O.D. -> Once daily
            - AC -> Before meals | PC -> After meals | HS -> At bedtime
-           - BBF -> Before Breakfast | ABF -> After Breakfast
-           - BDN -> Before Dinner | ADN -> After Dinner
-        5. DASH / HYPHEN DOSAGE NOTATIONS (e.g., 1-x-1, 1-0-1, 1-2): 
+           - p/o -> By mouth / orally | PR -> Patient Registration OR Pulse Rate (Use context)
+        6. DASH / HYPHEN DOSAGE NOTATIONS (e.g., 1-x-1, 1-0-1, 1-2): 
            - These strictly dictate Morning-Afternoon-Night pill counts. 
-           - '1-x-1' or '1-0-1' means 1 in the morning, 0 in the afternoon, 1 at night/evening. 
-           - '1-2' means 1 in the morning, 2 in the evening/night. 
            - You MUST completely translate these into plain English (e.g., "1 tablet in the morning and 2 tablets in the evening"). NEVER output the raw dashes like '1-2' in the final mapped dosage.
-        6. FORCED EXTRACTION (NO ILLEGIBLE TAGS): You are FORBIDDEN from using the word "[Illegible]" or leaving a field blank just because the handwriting is messy. You MUST force a transcription based on phonetic shapes and your clinical context. Make your absolute best guess.
-        7. AVOID INSTRUCTION BLEED (CRITICAL): 
+        7. AVOID INSTRUCTION BLEED: 
            - DO NOT assume or guess meal timings. 
-           - If a specific medication does not have explicit meal instructions (like 'AC', 'PC', or 'after food') written directly next to it, leave `special_instructions` STRICTLY BLANK. 
+           - If a specific medication does not have explicit meal instructions written directly next to it, leave `special_instructions` STRICTLY BLANK. 
            - DO NOT carry over or steal instructions from the medication written above or below it.
         8. DOSAGE FRACTIONS & BLANKS: 
            - Explicitly look for fractions (e.g., '1/2 tab'). Do not default to 1.
            - If a drug name has NO dosage/instructions written next to it, leave the frequency/duration blank.
         9. CIRCLED NUMBERS & GIBBERISH:
            - Circled numbers (⑦, ⑳) mean days (e.g., "for 7 days").
-           - If a scribble translates to OCR gibberish (like "m2.30"), deduce clinical meaning ("2.5mg" or "30mg").
+           - If a scribble translates to clear OCR gibberish (like "m2.30"), deduce clinical meaning ("2.5mg" or "30mg").
+        10. DRUG VS LAB TEST DISAMBIGUATION:
+           - DO NOT hallucinate lab test names (like 'Urine Routine') from gibberish text like '800L 1.6Sg'. 
+           - Use context clues: If an item under "Advice" has a dosage form, instructions (1-0-1), or duration, it MUST be classified as a medication, NEVER in `lab_investigations_prescribed`.
+        11. UNIT DISAMBIGUATION:
+           - If handwritten vitals use Imperial units (like 5'1" for height), explicitly drop any pre-printed conflicting metric units (like 'cm') from your final extraction to avoid impossible values like "5'1'' cm".
+        12. ANTI-HALLUCINATION FOR MEDS:
+           - If a word is absolute character gibberish (e.g., '□□03 =th'), DO NOT invent a real-sounding medication name. Transcribe the raw characters exactly as seen into the scratchpad, but omit it from the structured medications array rather than hallucinating a false drug.
         
         REQUIRED SCHEMA (Return ONLY valid JSON matching this structure):
         {
           "raw_spatial_scratchpad": {
              "top_section_demographics": ["string - literally transcribe lines at the top"],
+             "middle_tabular_grid": ["string - literally transcribe the visit history boxes"],
              "left_column_clinical_notes": ["string - literally transcribe lines on the left side"],
              "right_column_advice_medications": ["string - literally transcribe lines on the right side"],
              "bottom_section_signatures": ["string - literally transcribe the bottom lines"]
           },
-          "hospital_details": {"name": "string", "department": "string"},
-          "patient_demographics": {"name": "string", "age": "string", "gender": "string", "registration_number": "string", "visit_date": "string - LATEST ONLY", "recorded_visit_dates": ["string - ALL PAST DATES"], "doctor_name": "string"},
+          "hospital_details": {
+             "name": "string - EXACT text only, do not hallucinate standard hospital names", 
+             "department": "string"
+          },
+          "patient_demographics": {
+             "name": "string", 
+             "age": "string", 
+             "gender": "string", 
+             "registration_number": "string", 
+             "health_id_number": "string",
+             "token_number": "string",
+             "room_number": "string",
+             "visit_date": "string - LATEST ONLY", 
+             "recorded_visit_dates": ["string - ALL PAST DATES FROM THE MIDDLE GRID"], 
+             "doctor_name": ["string - EXTRACT ALL DOCTORS LISTED IN HEADER, NOT JUST THE FIRST"]
+          },
           "vitals_and_clinical_notes": {
               "blood_pressure": "string", 
               "pulse": "string", 
               "chief_complaints": ["string - USE FULL EXPANDED WORDS"], 
-              "other_notes": "string - Capture any scribbles, past visit tokens/details, or maternal history here."
+              "other_notes": "string - Clinical notes only. NO token numbers, NO administrative data."
           },
           "lab_investigations_prescribed": ["string - FULL TEST NAMES"],
           "medications": [
@@ -162,9 +180,9 @@ async def process_prescription(file: UploadFile = File(...)):
         SCORING RUBRIC:
         Start at 100 points.
         - Deduct 30 points if `hallucination_detected` is true (The AI invented text in the mapped fields that is NOT in the spatial scratchpad).
-        - Deduct 20 points if `structural_integrity_good` is false (Medications in vitals, lab tests in medications array, etc.).
+        - Deduct 20 points if `structural_integrity_good` is false (Medications in vitals, lab tests in medications array, token numbers in clinical notes, etc.).
         - Deduct 20 points if `all_text_extracted` is false (The spatial scratchpad has text that was completely ignored and not mapped to the structured fields).
-        - Deduct 10 points for failure to expand acronyms (e.g., leaving 'OD' instead of 'Once daily' or 'C/O' instead of 'Complains of').
+        - Deduct 10 points for failure to expand acronyms (e.g., leaving 'O.D.' instead of 'Once daily' or 'C/O' instead of 'Complains of').
         - Deduct 5 points for obvious typos or weird OCR artifacts.
         
         TASK: Output specific boolean flags, calculate the final score, and provide a detailed, highly user-friendly bulleted explanation in the `summary` array. 
@@ -177,11 +195,11 @@ async def process_prescription(file: UploadFile = File(...)):
           "structural_integrity_good": <boolean>,
           "all_text_extracted": <boolean>,
           "summary": [
-             "🟢 **Base score: 100/100**",
-             "🔴 **-20 points (Structural Error):** In the 'medications' array, the AI incorrectly listed 'USG Whole Abdomen' which is a scan, not a medication. It should be in 'lab_investigations_prescribed'.",
-             "🔴 **-20 points (Missing Text):** The spatial scratchpad contained the clinical note 'severe fever for 3 days', but the AI completely failed to map this into the 'vitals_and_clinical_notes' field.",
-             "🔴 **-10 points (Acronym Failure):** In the medication frequency for Paracetamol, the AI left 'BD' instead of properly expanding it to 'Twice daily'.",
-             "📝 **Final QA Score: 50/100**"
+              "🟢 **Base score: 100/100**",
+              "🔴 **-20 points (Structural Error):** In the 'medications' array, the AI incorrectly listed 'USG Whole Abdomen' which is a scan, not a medication. It should be in 'lab_investigations_prescribed'.",
+              "🔴 **-20 points (Missing Text):** The spatial scratchpad contained the clinical note 'severe fever for 3 days', but the AI completely failed to map this into the 'vitals_and_clinical_notes' field.",
+              "🔴 **-10 points (Acronym Failure):** In the medication frequency for Paracetamol, the AI left 'BD' instead of properly expanding it to 'Twice daily'.",
+              "📝 **Final QA Score: 50/100**"
           ]
         }}
         """
