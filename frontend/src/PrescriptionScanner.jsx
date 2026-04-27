@@ -28,16 +28,12 @@ export default function PrescriptionScanner() {
       });
       
       const data = await response.json();
-      console.log("Raw API Response from Backend:", data); 
-      
       if (!response.ok) {
           alert(`Notice: ${data.detail}`);
           return;
       }
-      
       setResults(data);
     } catch (error) {
-      console.error("Error processing file:", error);
       alert("Failed to connect to the server.");
     } finally {
       setLoading(false);
@@ -56,62 +52,37 @@ export default function PrescriptionScanner() {
     downloadAnchorNode.remove();
   };
 
+  // Generates the highly detailed row-by-row Entity Analysis CSV
   const handleDownloadCSV = () => {
     if (!results || !results.extracted_data) return;
-    
     const demo = results.extracted_data.patient_demographics || {};
-    const vitals = results.extracted_data.vitals_and_clinical_notes || {};
     const meds = results.extracted_data.medications || [];
-    const evaluation = results.evaluation || {};
 
     const escapeCSV = (value) => {
       if (value === null || value === undefined) return '""';
-      const stringified = String(value);
-      return `"${stringified.replace(/"/g, '""')}"`;
+      return `"${String(value).replace(/"/g, '""')}"`;
     };
 
-    const medsString = meds.map(m => 
-      `${m.drug_name || 'Unknown'} (${m.dosage || 'No dosage'}) - ${m.frequency_and_duration || 'No freq'}`
-    ).join(' | ');
-
     const headers = [
-      "Filename", "Patient Name", "Age", "Gender", "Registration No", "Visit Date", "Doctor Name",
-      "Blood Pressure", "Pulse", "Chief Complaints", "Clinical Notes",
-      "Total Medications", "Medications Detail",
-      "Accuracy Score", "Hallucinations Detected", "Structural Integrity", "All Text Extracted"
+      "Patient Name", "Visit Date", "Raw Shorthand (Written)", "Expanded Drug Name", 
+      "CMS Mapped Name", "CMS Status", "ICD-10 Diagnosis", "Dosage", 
+      "Frequency & Duration", "Instructions", "AI Confidence Score"
     ];
     
-    const rowData = [
-      escapeCSV(file?.name || 'prescription'),
-      escapeCSV(demo.name),
-      escapeCSV(demo.age),
-      escapeCSV(demo.gender),
-      escapeCSV(demo.registration_number),
-      escapeCSV(demo.visit_date),
-      escapeCSV(demo.doctor_name),
-      escapeCSV(vitals.blood_pressure),
-      escapeCSV(vitals.pulse),
-      escapeCSV((vitals.chief_complaints || []).join(', ')),
-      escapeCSV(vitals.other_notes),
-      meds.length,
-      escapeCSV(medsString),
-      escapeCSV(evaluation.accuracy_score),
-      escapeCSV(evaluation.hallucination_detected ? 'Yes' : 'No'),
-      escapeCSV(evaluation.structural_integrity_good ? 'Yes' : 'No'),
-      escapeCSV(evaluation.all_text_extracted ? 'Yes' : 'No')
-    ];
+    const rows = meds.map(m => [
+      escapeCSV(demo.name), escapeCSV(demo.visit_date), escapeCSV(m.raw_shorthand_name),
+      escapeCSV(m.expanded_drug_name), escapeCSV(m.official_cms_drug_name),
+      escapeCSV(m.cms_mapping_status), escapeCSV(m.associated_icd10_diagnosis),
+      escapeCSV(m.dosage), escapeCSV(m.frequency_and_duration), 
+      escapeCSV(m.special_instructions), escapeCSV(m.confidence_score ? `${m.confidence_score}%` : 'N/A')
+    ]);
 
-    const csvContent = [headers.join(","), rowData.join(",")].join("\n");
-
+    const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.setAttribute('hidden', '');
     a.setAttribute('href', url);
-    
-    const safeName = (demo.name || "Unknown_Patient").replace(/\s+/g, '_');
-    a.setAttribute('download', `detailed_audit_report_${safeName}.csv`);
-    
+    a.setAttribute('download', `Entity_Analysis_${(demo.name || "Patient").replace(/\s+/g, '_')}.csv`);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -119,18 +90,15 @@ export default function PrescriptionScanner() {
 
   const handlePrint = () => window.print();
 
-  // NEW HELPER: Converts markdown **bold** to HTML <strong> elements
-  const formatMarkdownBold = (text) => {
-    if (typeof text !== 'string') return text;
-    const parts = text.split(/\*\*(.*?)\*\*/g);
-    return parts.map((part, index) => 
-      index % 2 === 1 ? <strong key={index} style={{ color: '#1e293b' }}>{part}</strong> : part
-    );
+  const getConfidenceColor = (score) => {
+    if (!score) return '#94a3b8';
+    if (score >= 90) return '#10b981';
+    if (score >= 70) return '#f59e0b';
+    return '#ef4444'; 
   };
 
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto', fontFamily: 'sans-serif', padding: '20px', position: 'relative' }}>
-      
       <style>{`@media print { .no-print { display: none !important; } body { background-color: #fff; } .print-clean { box-shadow: none !important; border: none !important; } }`}</style>
 
       <button 
@@ -138,7 +106,7 @@ export default function PrescriptionScanner() {
         className="no-print"
         style={{ position: 'absolute', top: '20px', right: '20px', padding: '8px 12px', fontSize: '12px', cursor: 'pointer', backgroundColor: isCustomerMode ? '#e2e8f0' : '#3b82f6', color: isCustomerMode ? '#475569' : '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}
       >
-        {isCustomerMode ? '👁️ Enable Validation View' : '🙈 Hide Validation (Clinical Mode)'}
+        {isCustomerMode ? '👁️ Enable Validation View' : '🙈 Hide Validation'}
       </button>
 
       <h2 className="no-print" style={{ textAlign: 'center', color: '#333', marginTop: '10px' }}>AI Prescription Digitization</h2>
@@ -152,7 +120,6 @@ export default function PrescriptionScanner() {
       </div>
 
       <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-        
         <div className="no-print" style={{ flex: '1 1 400px' }}>
           <h3>Original Document</h3>
           {preview ? (
@@ -164,145 +131,85 @@ export default function PrescriptionScanner() {
 
         <div style={{ flex: '1 1 500px' }}>
           {results && results.status === 'success' && (
-            <>
-              {!isCustomerMode && (
-                <div className="no-print">
-                  
-                  <div style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '8px', marginBottom: '20px', border: `1px solid #cdd4e0`, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '10px' }}>
-                      <h3 style={{ margin: '0', color: '#1e293b' }}>Quality Assurance Report</h3>
-                      <div style={{ fontSize: '18px', fontWeight: 'bold', color: results.evaluation.accuracy_score >= 80 ? '#059669' : '#dc2626', backgroundColor: results.evaluation.accuracy_score >= 80 ? '#d1fae5' : '#fee2e2', padding: '4px 12px', borderRadius: '20px' }}>
-                        Score: {results.evaluation.accuracy_score}/100
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '15px' }}>
-                      <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Hallucinations</div>
-                        <div style={{ fontSize: '14px', fontWeight: 'bold', color: results.evaluation.hallucination_detected ? '#dc2626' : '#059669' }}>
-                          {results.evaluation.hallucination_detected ? '🚨 YES' : '✅ NO'}
-                        </div>
-                      </div>
-                      <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Structural Integrity</div>
-                        <div style={{ fontSize: '14px', fontWeight: 'bold', color: results.evaluation.structural_integrity_good ? '#059669' : '#dc2626' }}>
-                          {results.evaluation.structural_integrity_good ? '✅ YES' : '❌ NO'}
-                        </div>
-                      </div>
-                      <div style={{ backgroundColor: '#f8fafc', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>All Text Extracted</div>
-                        <div style={{ fontSize: '14px', fontWeight: 'bold', color: results.evaluation.all_text_extracted ? '#059669' : '#dc2626' }}>
-                          {results.evaluation.all_text_extracted ? '✅ YES' : '❌ NO'}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ color: '#334155', fontSize: '13px' }}>
-                      <strong style={{ display: 'block', marginBottom: '8px', color: '#475569', fontSize: '14px' }}>Detailed QA Audit:</strong>
-                      {(() => {
-                        const notesData = 
-                          results.evaluation.summary || 
-                          results.evaluation.bulleted_score_explanation || 
-                          results.evaluation.deductions_log || 
-                          results.evaluation.qa_notes;
-
-                        if (Array.isArray(notesData) && notesData.length > 0) {
-                          return (
-                            <ul style={{ margin: '0', paddingLeft: '20px', lineHeight: '1.6' }}>
-                              {/* Apply the formatMarkdownBold function here */}
-                              {notesData.map((point, index) => <li key={index} style={{ marginBottom: '6px' }}>{formatMarkdownBold(point)}</li>)}
-                            </ul>
-                          );
-                        } else if (typeof notesData === 'string' && notesData.trim() !== '') {
-                          return <span>{formatMarkdownBold(notesData)}</span>;
-                        } else {
-                          return <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No notes provided. Open DevTools (F12) to check raw JSON.</span>;
-                        }
-                      })()}
-                    </div>
-                  </div>
+            <div className="print-clean" style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
+              
+              <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
+                <h2 style={{ margin: '0', color: '#333' }}>Digitized Patient Record</h2>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button onClick={handleDownloadCSV} style={{ padding: '6px 12px', backgroundColor: '#0ea5e9', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>📊 CSV</button>
+                  <button onClick={handleDownloadJSON} style={{ padding: '6px 12px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>⬇️ JSON</button>
+                  <button onClick={handlePrint} style={{ padding: '6px 12px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>🖨️ Save PDF</button>
                 </div>
-              )}
-
-              <div className="print-clean" style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
-                <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
-                  <h2 style={{ margin: '0', color: '#333' }}>Digitized Patient Record</h2>
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <button onClick={handleDownloadCSV} style={{ padding: '6px 12px', backgroundColor: '#0ea5e9', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>📊 CSV</button>
-                    <button onClick={handleDownloadJSON} style={{ padding: '6px 12px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>⬇️ JSON</button>
-                    <button onClick={handlePrint} style={{ padding: '6px 12px', backgroundColor: '#4f46e5', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>🖨️ Save PDF</button>
-                  </div>
-                </div>
-
-                <h2 style={{ display: 'none' }} className="print-only-title">Digital Medical Record</h2>
-                <style>{`@media print { .print-only-title { display: block !important; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; } }`}</style>
-                
-                <div style={{ marginBottom: '15px' }}>
-                  <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Patient Demographics</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '14px', backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
-                    <div><span style={{ color: '#888' }}>Name:</span> <br/><strong>{results.extracted_data.patient_demographics?.name || 'N/A'}</strong></div>
-                    <div><span style={{ color: '#888' }}>Age/Sex:</span> <br/><strong>{results.extracted_data.patient_demographics?.age || '-'} / {results.extracted_data.patient_demographics?.gender || '-'}</strong></div>
-                    <div><span style={{ color: '#888' }}>Reg No:</span> <br/><strong>{results.extracted_data.patient_demographics?.registration_number || '-'}</strong></div>
-                    
-                    <div style={{ backgroundColor: '#e6f2ff', padding: '8px', borderRadius: '4px', borderLeft: '3px solid #007bff' }}>
-                      <span style={{ color: '#0056b3', fontWeight: 'bold' }}>Initial Visit:</span> <br/>
-                      <strong style={{ fontSize: '15px' }}>{results.extracted_data.patient_demographics?.visit_date || 'Not Found'}</strong>
-                      {results.extracted_data.patient_demographics?.recorded_visit_dates?.length > 0 && (
-                        <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #b8daff' }}>
-                          <span style={{ color: '#0056b3', fontSize: '12px', fontWeight: 'bold' }}>Other Recorded Visits:</span><br/>
-                          <strong style={{ fontSize: '14px', color: '#333' }}>{results.extracted_data.patient_demographics.recorded_visit_dates.join(', ')}</strong>
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ gridColumn: 'span 2' }}><span style={{ color: '#888' }}>Doctor:</span> <br/><strong>{results.extracted_data.patient_demographics?.doctor_name || '-'}</strong></div>
-                  </div>
-                </div>
-
-                <div style={{ marginBottom: '15px' }}>
-                  <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Vitals & Clinical Notes</h4>
-                  <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee', fontSize: '14px' }}>
-                    <div style={{ display: 'flex', gap: '20px', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px dashed #ddd' }}>
-                      <div><span style={{ color: '#888' }}>BP:</span> <strong>{results.extracted_data.vitals_and_clinical_notes?.blood_pressure || 'N/A'}</strong></div>
-                      <div><span style={{ color: '#888' }}>Pulse:</span> <strong>{results.extracted_data.vitals_and_clinical_notes?.pulse || 'N/A'}</strong></div>
-                    </div>
-                    <p style={{ margin: '0 0 5px 0' }}><span style={{ color: '#888' }}>Complaints:</span> <br/>{results.extracted_data.vitals_and_clinical_notes?.chief_complaints?.join(', ') || 'None noted'}</p>
-                    <p style={{ margin: '0' }}><span style={{ color: '#888' }}>Notes:</span> <br/>{results.extracted_data.vitals_and_clinical_notes?.other_notes || 'None'}</p>
-                  </div>
-                </div>
-
-                {results.extracted_data.lab_investigations_ordered && results.extracted_data.lab_investigations_ordered.length > 0 && (
-                  <div style={{ marginBottom: '15px' }}>
-                     <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Lab Investigations Ordered</h4>
-                     <ul style={{ margin: '0', paddingLeft: '20px', fontSize: '14px', backgroundColor: '#fff', padding: '10px 10px 10px 25px', borderRadius: '6px', border: '1px solid #eee' }}>
-                        {results.extracted_data.lab_investigations_ordered.map((lab, index) => <li key={index} style={{ marginBottom: '4px' }}>{lab}</li>)}
-                     </ul>
-                  </div>
-                )}
-
-                <div>
-                  <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Prescribed Medications</h4>
-                  {results.extracted_data.medications?.length > 0 ? (
-                    results.extracted_data.medications.map((med, index) => (
-                      <div key={index} style={{ marginBottom: '10px', padding: '12px', backgroundColor: '#fff', border: '1px solid #eee', borderLeft: '4px solid #007bff', borderRadius: '4px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                          <strong style={{ fontSize: '16px', color: '#222' }}>{med.drug_name}</strong>
-                          {med.dosage && <span style={{ backgroundColor: '#e9ecef', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }}>{med.dosage}</span>}
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#555', lineHeight: '1.5' }}>
-                          <div><span style={{ color: '#888' }}>Frequency/Duration:</span> {med.frequency_and_duration || 'Not specified'}</div>
-                          {med.special_instructions && (
-                            <div style={{ marginTop: '4px', color: '#d35400' }}><span style={{ fontWeight: 'bold' }}>Instructions:</span> {med.special_instructions}</div>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ fontSize: '14px', color: '#888', fontStyle: 'italic' }}>No medications extracted.</div>
-                  )}
-                </div>
-                
               </div>
-            </>
+
+              <h2 style={{ display: 'none' }} className="print-only-title">Digital Medical Record</h2>
+              <style>{`@media print { .print-only-title { display: block !important; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; } }`}</style>
+              
+              <div style={{ marginBottom: '15px' }}>
+                <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Patient Demographics</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '14px', backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
+                  <div><span style={{ color: '#888' }}>Name:</span> <br/><strong>{results.extracted_data.patient_demographics?.name || 'N/A'}</strong></div>
+                  <div><span style={{ color: '#888' }}>Age/Sex:</span> <br/><strong>{results.extracted_data.patient_demographics?.age || '-'} / {results.extracted_data.patient_demographics?.gender || '-'}</strong></div>
+                  <div><span style={{ color: '#888' }}>Reg No:</span> <br/><strong>{results.extracted_data.patient_demographics?.registration_number || '-'}</strong></div>
+                  <div><span style={{ color: '#888' }}>Visit Date:</span> <br/><strong>{results.extracted_data.patient_demographics?.visit_date || '-'}</strong></div>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '15px' }}>
+                <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Vitals & Clinical Notes</h4>
+                <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee', fontSize: '14px' }}>
+                  <div style={{ display: 'flex', gap: '20px', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px dashed #ddd' }}>
+                    <div><span style={{ color: '#888' }}>BP:</span> <strong>{results.extracted_data.vitals_and_clinical_notes?.blood_pressure || 'N/A'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Pulse:</span> <strong>{results.extracted_data.vitals_and_clinical_notes?.pulse || 'N/A'}</strong></div>
+                  </div>
+                  <p style={{ margin: '0 0 5px 0' }}><span style={{ color: '#888' }}>Complaints:</span> <br/>{results.extracted_data.vitals_and_clinical_notes?.chief_complaints?.join(', ') || 'None noted'}</p>
+                </div>
+              </div>
+
+              <div>
+                <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Prescribed Medications</h4>
+                {results.extracted_data.medications?.length > 0 ? (
+                  results.extracted_data.medications.map((med, index) => (
+                    <div key={index} style={{ marginBottom: '10px', padding: '12px', backgroundColor: '#fff', border: '1px solid #eee', borderLeft: '4px solid #007bff', borderRadius: '4px' }}>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <strong style={{ fontSize: '16px', color: '#222' }}>{med.expanded_drug_name}</strong>
+                          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                            ✍️ Written as: <code style={{ backgroundColor: '#f1f5f9', padding: '1px 4px', borderRadius: '3px' }}>{med.raw_shorthand_name}</code>
+                          </div>
+                          <div style={{ fontSize: '12px', color: med.cms_mapping_status?.includes("✅") ? '#15803d' : '#b45309', fontWeight: 'bold', marginTop: '4px' }}>
+                            {med.cms_mapping_status}: {med.official_cms_drug_name}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+                           <div style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', backgroundColor: `${getConfidenceColor(med.confidence_score)}20`, color: getConfidenceColor(med.confidence_score) }}>
+                             AI Confidence: {med.confidence_score}%
+                           </div>
+                           {med.associated_icd10_diagnosis && (
+                             <span style={{ backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #bfdbfe' }}>
+                               🏥 {med.associated_icd10_diagnosis}
+                             </span>
+                           )}
+                           {med.dosage && <span style={{ backgroundColor: '#e9ecef', padding: '3px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold', color: '#495057' }}>{med.dosage}</span>}
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: '13px', color: '#555', lineHeight: '1.5', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f8f9fa' }}>
+                        <div><span style={{ color: '#888' }}>Frequency:</span> <strong>{med.frequency_and_duration || 'Not specified'}</strong></div>
+                        {med.special_instructions && (
+                          <div style={{ marginTop: '4px', color: '#d35400' }}><span style={{ fontWeight: 'bold' }}>Instructions:</span> {med.special_instructions}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ fontSize: '14px', color: '#888', fontStyle: 'italic' }}>No medications extracted.</div>
+                )}
+              </div>
+              
+            </div>
           )}
         </div>
       </div>
