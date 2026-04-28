@@ -176,7 +176,7 @@ export default function PrescriptionScanner() {
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                           <strong style={{ fontSize: '16px', color: '#222' }}>{med.expanded_drug_name}</strong>
                           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                            ✍️ Written as: <code style={{ backgroundColor: '#f1f5f9', padding: '1px 4px', borderRadius: '3px' }}>{med.raw_shorthand_name}</code>
+                            ✍️ Written as: <code style={{ backgroundColor: '#373a3e', padding: '1px 4px', borderRadius: '3px' }}>{med.raw_shorthand_name}</code>
                           </div>
                           <div style={{ fontSize: '12px', color: med.cms_mapping_status?.includes("✅") ? '#15803d' : '#b45309', fontWeight: 'bold', marginTop: '4px' }}>
                             {med.cms_mapping_status}: {med.official_cms_drug_name}

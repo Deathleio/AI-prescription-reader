@@ -36,7 +36,7 @@ CMS_DRUG_LIST = []
 async def load_datasets():
     global CMS_DRUG_LIST
     
-    # LOAD CMS DRUG INVENTORY (For Local Backend Validation - Costs 0 Tokens)
+    # LOAD CMS DRUG INVENTORY (For Local Backend Validation - 0 API Tokens)
     try:
         print("⏳ Loading CMS Drug Inventory Dataset...")
         cms_possible_names = ["CMS-DATASET.csv", "CMS-DATASET.xlsx - Sheet1.csv"]
@@ -75,44 +75,89 @@ async def process_prescription(file: UploadFile = File(...)):
         file_bytes = await file.read()
         image = Image.open(io.BytesIO(file_bytes))
         
-        # --- 1. LEAN EXTRACTION & ENTITY ANALYSIS (GEMINI 2.5 FLASH ONLY) ---
-        # We hardcode the most critical rules here to save thousands of tokens.
+        # --- 1. AGGRESSIVE LEAN EXTRACTION (GEMINI 2.5 FLASH ONLY) ---
         extractor_prompt = """
         You are a world-class medical OCR system processing a messy Indian Government Hospital OPD Card. 
+        Your absolute primary directive is 100% extraction without dropping a single word.
         
-        CRITICAL RULES:
-        1. SPATIAL ZONING: Use the `raw_spatial_scratchpad` to transcribe block-by-block. 
+        CRITICAL RULES FOR EXTRACTION:
+        1. SPATIAL ZONING SCRATCHPAD: You MUST use the `raw_spatial_scratchpad` to transcribe the document block-by-block. 
+           - Look at LEFT margin for Clinical Notes, RIGHT margin for Advice (Meds/Labs/Rx).
+
+        2. AGGRESSIVE DRUG EXTRACTION (NEVER DROP A MEDICINE): 
+           - Look closely under the "Rx" or "Advice" section. There are often multiple medications listed numerically (1, 2, 3...). You MUST extract ALL of them. 
+           - If the handwriting is messy, DO NOT drop the item. Make your absolute best clinical guess based on the visible phonetic shapes and standard Indian prescribing combinations (e.g., if you see Pantocid, the next might be an antacid gel or enzyme).
+           - Extract whatever part of the name you can read (e.g., if you can only read 'Cap. Vizi...', extract it and expand it to 'Vizylac').
         
-        2. DRUG EXTRACTION & EXPANSION:
-           - `raw_shorthand_name`: Extract EXACTLY what the doctor wrote (e.g., 'T. Panto', 'Syr. Amoxy').
-           - `expanded_drug_name`: Provide the full medical expansion (e.g., 'Pantoprazole', 'Amoxicillin').
+        3. COMPREHENSIVE MEDICAL ABBREVIATIONS & EXPANSIONS:
+           A. MEDICATIONS / DRUGS:
+              - PCM / Para / Calpol -> Paracetamol
+              - Pan / Panto / Pantocid -> Pantoprazole
+              - Amoxy -> Amoxicillin
+              - Azithro -> Azithromycin
+              - Diclo -> Diclofenac
+              - Tel / Telma -> Telmisartan
+              - Atorva -> Atorvastatin
+              - Met -> Metformin
+              - Glime -> Glimepiride
+              - Ambro -> Ambroxol
+              - Drotin / Drothin -> Drotaverine
+              - Ondem -> Ondansetron
+              - Duphalac -> Lactulose
+              - Folvite -> Folic Acid
+              - Cal -> Calcium
+
+           B. FORMULATIONS:
+              - T. / Tab -> Tablet
+              - Syp. / Syr. -> Syrup
+              - Cap. -> Capsule
+              - Inj. -> Injection
+              - Oint. / Gel -> Ointment / Gel
+              - E/D -> Eye Drop
+
+           C. FREQUENCY / TIMINGS / INSTRUCTIONS:
+              - OD -> Once daily
+              - BD / BID -> Twice daily
+              - TDS / TID -> Thrice daily
+              - QDS / 4 t/d -> Four times a day
+              - HS / BT -> At bedtime / at night
+              - AC / BBF -> Before meals / Before breakfast
+              - PC -> After meals
+              - SOS -> As needed / Situational
+
+           D. CLINICAL NOTES:
+              - C/O or c/o -> Complains of
+              - O/E -> On examination
+              - Adv -> Advice
            
-        3. HARDCODED ABBREVIATIONS & DOSAGE STRICTNESS (EXPAND THESE):
-           - DRUGS: PCM/Para -> Paracetamol | Panto/Pan -> Pantoprazole | Amoxy -> Amoxicillin | Azithro -> Azithromycin | Diclo -> Diclofenac | Tel/Telma -> Telmisartan | Atorva -> Atorvastatin | Met -> Metformin | Glime -> Glimepiride.
-           - TIMING: OD -> Once daily | BD -> Twice daily | TDS/TID -> Thrice daily | QDS -> Four times a day | HS/BT -> At bedtime | AC -> Before meals | PC -> After meals | SOS -> As needed.
-           - DASH NOTATIONS: 
-             * '1-x-1' or '1-0-1' MUST be translated to: "1 in the morning, skip afternoon, 1 at night".
-             * '1-1-1' MUST be translated to: "1 in the morning, 1 in the afternoon, 1 at night".
-             * '1-2' MUST be translated to: "1 in the morning, 2 at night".
-           - NEVER output raw dashes (like '1-x-1') in the final frequency field. Translate it to English.
+        4. DASH NOTATION DOSAGE STRICTNESS: 
+           - '1-x-1' or '1-0-1' MUST be translated to: "1 in the morning, skip afternoon, 1 at night".
+           - '1-1-1' MUST be translated to: "1 in the morning, 1 in the afternoon, 1 at night".
+           - '1-2' MUST be translated to: "1 in the morning, 2 at night".
+           - '1-0-0' MUST be translated to: "1 in the morning only".
+           - NEVER output raw dashes in the frequency field. Translate it to English.
            
-        4. SELF-EVALUATED CONFIDENCE: For every medication, provide a `confidence_score` (integer 0 to 100).
+        5. SELF-EVALUATED CONFIDENCE: For every medication, provide a `confidence_score` (integer 0 to 100) based on legibility. For messy items you had to guess, give a lower score (e.g., 60-75).
         
-        5. ICD-10 CODING: Deduce the specific medical condition treating each medication and provide the alphanumeric ICD-10 code.
+        6. ICD-10 CODING: Deduce the specific medical condition treating each medication and provide the alphanumeric ICD-10 code.
         
         REQUIRED SCHEMA (Return ONLY valid JSON):
         {
           "raw_spatial_scratchpad": {
              "top_section_demographics": ["string"],
+             "middle_tabular_grid": ["string"],
              "left_column_clinical_notes": ["string"],
-             "right_column_advice_medications": ["string"]
+             "right_column_advice_medications": ["string"],
+             "bottom_section_signatures": ["string"]
           },
-          "patient_demographics": {"name": "string", "age": "string", "gender": "string", "registration_number": "string", "visit_date": "string"},
+          "hospital_details": {"name": "string", "department": "string"},
+          "patient_demographics": {
+             "name": "string", "age": "string", "gender": "string", "registration_number": "string", 
+             "health_id_number": "string", "token_number": "string", "room_number": "string",
+             "visit_date": "string", "recorded_visit_dates": ["string"], "doctor_name": ["string"]
+          },
           "vitals_and_clinical_notes": {
-              "blood_pressure": "string", 
-              "pulse": "string", 
-              "chief_complaints": ["string"], 
-              "other_notes": "string"
+              "blood_pressure": "string", "pulse": "string", "chief_complaints": ["string"], "other_notes": "string"
           },
           "lab_investigations_prescribed": ["string"],
           "medications": [
@@ -144,8 +189,7 @@ async def process_prescription(file: UploadFile = File(...)):
                 error_str = str(e).lower()
                 
                 if attempt < max_retries - 1:
-                    # Exponential backoff (5s, 10s, 15s) on standard rate limits
-                    wait_time = (attempt + 1) * 5 
+                    wait_time = (attempt + 1) * 6 
                     print(f"⏳ Google Server Busy. Retrying in {wait_time}s... (Attempt {attempt + 1}/{max_retries})")
                     time.sleep(wait_time)
                 else:
@@ -161,11 +205,13 @@ async def process_prescription(file: UploadFile = File(...)):
                 raw_expanded = med.get("expanded_drug_name", "").lower()
                 best_match = None
                 
+                # Check for exact substring matches
                 for official_drug in CMS_DRUG_LIST:
                     if raw_expanded in official_drug or official_drug in raw_expanded:
                         best_match = official_drug
                         break
                 
+                # Check for fuzzy matches (spelling mistakes)
                 if not best_match:
                     fuzzy_matches = difflib.get_close_matches(raw_expanded, CMS_DRUG_LIST, n=1, cutoff=0.6)
                     if fuzzy_matches:
@@ -173,15 +219,16 @@ async def process_prescription(file: UploadFile = File(...)):
                 
                 if best_match:
                     med["official_cms_drug_name"] = best_match.title()
-                    med["cms_mapping_status"] = "✅ CMS Mapped (Common)"
+                    med["cms_mapping_status"] = "✅ CMS Mapped"
                 else:
                     med["official_cms_drug_name"] = raw_expanded.title() 
                     med["cms_mapping_status"] = "⚠️ Outside Purchase"
 
+        # Bypass OpenAI QA Evaluation
         return {
             "status": "success",
             "extracted_data": extracted_data,
-            "evaluation": {"accuracy_score": 100, "summary": ["QA bypassed for lean entity analysis."]}
+            "evaluation": {"accuracy_score": 100, "summary": ["QA bypassed for comprehensive entity analysis."]}
         }
 
     except Exception as e:
