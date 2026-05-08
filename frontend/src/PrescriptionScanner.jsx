@@ -11,29 +11,46 @@ export default function PrescriptionScanner() {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
       setFile(selectedFile);
+      // Show the raw uploaded image locally before processing
       setPreview(URL.createObjectURL(selectedFile));
+      // Reset results if a new file is chosen
+      setResults(null); 
     }
   };
 
   const processImage = async () => {
     if (!file) return;
     setLoading(true);
-    const formData = new FormData();
-    formData.append('file', file);
 
     try {
+      // Create a standard form payload with the actual image file
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // Send to our ALL-IN-ONE memory endpoint
       const response = await fetch('http://localhost:8000/api/process-prescription', {
         method: 'POST',
         body: formData,
       });
       
       const data = await response.json();
+      
       if (!response.ok) {
-          alert(`Notice: ${data.detail}`);
+          alert(`Notice: ${data.detail || "Processing failed"}`);
+          setLoading(false);
           return;
       }
+      
+      // Update the left preview panel with the YOLO-anonymized Base64 string!
+      if (data.anonymized_preview) {
+         setPreview(data.anonymized_preview);
+      }
+      
+      // Set the extracted text results
       setResults(data);
+
     } catch (error) {
+      console.error(error);
       alert("Failed to connect to the server.");
     } finally {
       setLoading(false);
@@ -52,7 +69,6 @@ export default function PrescriptionScanner() {
     downloadAnchorNode.remove();
   };
 
-  // Generates the highly detailed row-by-row Entity Analysis CSV
   const handleDownloadCSV = () => {
     if (!results || !results.extracted_data) return;
     const demo = results.extracted_data.patient_demographics || {};
@@ -115,7 +131,7 @@ export default function PrescriptionScanner() {
         <input type="file" accept="image/*" onChange={handleFileChange} />
         <br /><br />
         <button onClick={processImage} disabled={!file || loading} style={{ padding: '10px 20px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>
-          {loading ? 'Analyzing Document...' : 'Process Prescription'}
+          {loading ? 'Anonymizing in Memory & Analyzing...' : 'Process Prescription'}
         </button>
       </div>
 
@@ -143,18 +159,37 @@ export default function PrescriptionScanner() {
               </div>
 
               <h2 style={{ display: 'none' }} className="print-only-title">Digital Medical Record</h2>
-              <style>{`@media print { .print-only-title { display: block !important; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; } }`}</style>
               
+              {/* --- 1. PATIENT DEMOGRAPHICS --- */}
               <div style={{ marginBottom: '15px' }}>
                 <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Patient Demographics</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '14px', backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
-                  <div><span style={{ color: '#888' }}>Name:</span> <br/><strong>{results.extracted_data.patient_demographics?.name || 'N/A'}</strong></div>
-                  <div><span style={{ color: '#888' }}>Age/Sex:</span> <br/><strong>{results.extracted_data.patient_demographics?.age || '-'} / {results.extracted_data.patient_demographics?.gender || '-'}</strong></div>
-                  <div><span style={{ color: '#888' }}>Reg No:</span> <br/><strong>{results.extracted_data.patient_demographics?.registration_number || '-'}</strong></div>
-                  <div><span style={{ color: '#888' }}>Visit Date:</span> <br/><strong>{results.extracted_data.patient_demographics?.visit_date || '-'}</strong></div>
+                <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '14px' }}>
+                    <div><span style={{ color: '#888' }}>Name:</span> <br/><strong>{results.extracted_data.patient_demographics?.name || 'N/A'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Age/Sex:</span> <br/><strong>{results.extracted_data.patient_demographics?.age || '-'} / {results.extracted_data.patient_demographics?.gender || '-'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Reg/Health ID:</span> <br/><strong>{results.extracted_data.patient_demographics?.registration_number || '-'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Latest Visit Date:</span> <br/><strong>{results.extracted_data.patient_demographics?.visit_date || '-'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Token / Room:</span> <br/><strong>{results.extracted_data.patient_demographics?.token_number || '-'} / {results.extracted_data.patient_demographics?.room_number || '-'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Doctor:</span> <br/><strong>{results.extracted_data.patient_demographics?.doctor_name?.join(', ') || '-'}</strong></div>
+                  </div>
+                  
+                  {/* Past Visitation Dates */}
+                  {results.extracted_data.patient_demographics?.recorded_visit_dates?.length > 0 && (
+                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #eee' }}>
+                      <span style={{ color: '#888', fontSize: '12px', display: 'block', marginBottom: '4px' }}>Historical Visits Found:</span>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {results.extracted_data.patient_demographics.recorded_visit_dates.map((date, i) => (
+                          <span key={i} style={{ backgroundColor: '#f1f5f9', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', color: '#475569', border: '1px solid #cbd5e1' }}>
+                            🗓️ {date}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
+              {/* --- 2. VITALS & CLINICAL NOTES --- */}
               <div style={{ marginBottom: '15px' }}>
                 <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Vitals & Clinical Notes</h4>
                 <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee', fontSize: '14px' }}>
@@ -162,10 +197,40 @@ export default function PrescriptionScanner() {
                     <div><span style={{ color: '#888' }}>BP:</span> <strong>{results.extracted_data.vitals_and_clinical_notes?.blood_pressure || 'N/A'}</strong></div>
                     <div><span style={{ color: '#888' }}>Pulse:</span> <strong>{results.extracted_data.vitals_and_clinical_notes?.pulse || 'N/A'}</strong></div>
                   </div>
-                  <p style={{ margin: '0 0 5px 0' }}><span style={{ color: '#888' }}>Complaints:</span> <br/>{results.extracted_data.vitals_and_clinical_notes?.chief_complaints?.join(', ') || 'None noted'}</p>
+                  
+                  <div style={{ marginBottom: '6px' }}>
+                    <span style={{ color: '#888', fontWeight: 'bold' }}>Chief Complaints:</span> 
+                    <p style={{ margin: '2px 0 0 0', paddingLeft: '8px', borderLeft: '3px solid #f59e0b' }}>
+                      {results.extracted_data.vitals_and_clinical_notes?.chief_complaints?.join(', ') || 'None noted'}
+                    </p>
+                  </div>
+
+                  {results.extracted_data.vitals_and_clinical_notes?.other_notes && (
+                    <div style={{ marginTop: '8px' }}>
+                      <span style={{ color: '#888', fontWeight: 'bold' }}>Other Findings / Notes:</span> 
+                      <p style={{ margin: '2px 0 0 0', paddingLeft: '8px', borderLeft: '3px solid #3b82f6', whiteSpace: 'pre-wrap' }}>
+                        {results.extracted_data.vitals_and_clinical_notes.other_notes}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
+              {/* --- 3. LAB INVESTIGATIONS --- */}
+              {results.extracted_data.lab_investigations_prescribed?.length > 0 && (
+                <div style={{ marginBottom: '15px' }}>
+                  <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Advised Investigations / Scans</h4>
+                  <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
+                    <ul style={{ margin: '0', paddingLeft: '20px', fontSize: '14px', color: '#333' }}>
+                      {results.extracted_data.lab_investigations_prescribed.map((lab, i) => (
+                        <li key={i} style={{ marginBottom: '4px' }}><strong>{lab}</strong></li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* --- 4. MEDICATIONS --- */}
               <div>
                 <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Prescribed Medications</h4>
                 {results.extracted_data.medications?.length > 0 ? (
@@ -176,7 +241,7 @@ export default function PrescriptionScanner() {
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                           <strong style={{ fontSize: '16px', color: '#222' }}>{med.expanded_drug_name}</strong>
                           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                            ✍️ Written as: <code style={{ backgroundColor: '#373a3e', padding: '1px 4px', borderRadius: '3px' }}>{med.raw_shorthand_name}</code>
+                            ✍️ Written as: <code style={{ backgroundColor: '#f1f5f9', color: '#334155', padding: '2px 4px', borderRadius: '3px', fontWeight: 'bold' }}>{med.raw_shorthand_name}</code>
                           </div>
                           <div style={{ fontSize: '12px', color: med.cms_mapping_status?.includes("✅") ? '#15803d' : '#b45309', fontWeight: 'bold', marginTop: '4px' }}>
                             {med.cms_mapping_status}: {med.official_cms_drug_name}
