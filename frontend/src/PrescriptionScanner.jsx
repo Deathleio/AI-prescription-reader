@@ -11,9 +11,7 @@ export default function PrescriptionScanner() {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
       setFile(selectedFile);
-      // Show the raw uploaded image locally before processing
       setPreview(URL.createObjectURL(selectedFile));
-      // Reset results if a new file is chosen
       setResults(null); 
     }
   };
@@ -23,11 +21,9 @@ export default function PrescriptionScanner() {
     setLoading(true);
 
     try {
-      // Create a standard form payload with the actual image file
       const formData = new FormData();
       formData.append('file', file);
 
-      // Send to our ALL-IN-ONE memory endpoint
       const response = await fetch('http://localhost:8000/api/process-prescription', {
         method: 'POST',
         body: formData,
@@ -41,12 +37,10 @@ export default function PrescriptionScanner() {
           return;
       }
       
-      // Update the left preview panel with the YOLO-anonymized Base64 string!
       if (data.anonymized_preview) {
          setPreview(data.anonymized_preview);
       }
       
-      // Set the extracted text results
       setResults(data);
 
     } catch (error) {
@@ -106,10 +100,11 @@ export default function PrescriptionScanner() {
 
   const handlePrint = () => window.print();
 
-  const getConfidenceColor = (score) => {
-    if (!score) return '#94a3b8';
-    if (score >= 90) return '#10b981';
-    if (score >= 70) return '#f59e0b';
+  const getScoreColor = (score, max = 100) => {
+    const percentage = (score / max) * 100;
+    if (percentage >= 90) return '#10b981'; 
+    if (percentage >= 70) return '#3b82f6'; 
+    if (percentage >= 50) return '#f59e0b'; 
     return '#ef4444'; 
   };
 
@@ -131,7 +126,7 @@ export default function PrescriptionScanner() {
         <input type="file" accept="image/*" onChange={handleFileChange} />
         <br /><br />
         <button onClick={processImage} disabled={!file || loading} style={{ padding: '10px 20px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>
-          {loading ? 'Anonymizing in Memory & Analyzing...' : 'Process Prescription'}
+          {loading ? 'Extracting Data & Running Dual-AI Audits...' : 'Process Prescription'}
         </button>
       </div>
 
@@ -158,9 +153,54 @@ export default function PrescriptionScanner() {
                 </div>
               </div>
 
+              {/* --- DUAL-LAYER QA EVALUATION DASHBOARD --- */}
+              {results.evaluation && isCustomerMode && (
+                <div className="no-print" style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#fff', border: `1px solid ${getScoreColor(results.evaluation.score)}`, borderRadius: '8px', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '15px' }}>
+                     <div>
+                       <h4 style={{ margin: '0 0 4px 0', color: '#333', fontSize: '16px' }}>Extraction Quality Score</h4>
+                       <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
+                         {results.evaluation.grade}
+                       </span>
+                     </div>
+                     <div style={{ fontSize: '28px', fontWeight: 'bold', color: getScoreColor(results.evaluation.score) }}>
+                       {results.evaluation.score}<span style={{ fontSize: '16px', color: '#94a3b8' }}>/100</span>
+                     </div>
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '15px' }}>
+                    {/* Layer 1: Python Deterministic */}
+                    <div style={{ flex: 1, backgroundColor: '#f8fafc', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '8px' }}>🤖 LAYER 1: STRICT REGEX AUDITOR</div>
+                      <div style={{ fontSize: '12px', color: '#334155', display: 'flex', justifyContent: 'space-between' }}><span>CMS Mapping:</span> <strong>{results.evaluation.deterministic.breakdown["CMS Mapping"]}/20</strong></div>
+                      <div style={{ fontSize: '12px', color: '#334155', display: 'flex', justifyContent: 'space-between' }}><span>ICD-10 Format:</span> <strong>{results.evaluation.deterministic.breakdown["ICD-10 Format"]}/20</strong></div>
+                      <div style={{ fontSize: '12px', color: '#334155', display: 'flex', justifyContent: 'space-between' }}><span>Demographics:</span> <strong>{results.evaluation.deterministic.breakdown["Demographics"]}/10</strong></div>
+                      
+                      {results.evaluation.deterministic.issues.map((iss, i) => (
+                        <div key={i} style={{ fontSize: '11px', color: '#b91c1c', marginTop: '6px', lineHeight: '1.2' }}>• {iss}</div>
+                      ))}
+                    </div>
+
+                    {/* Layer 2: Semantic AI Critic */}
+                    <div style={{ flex: 1, backgroundColor: '#f0fdf4', padding: '10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#166534', marginBottom: '8px' }}>👁️ LAYER 2: SEMANTIC AI CRITIC</div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Meds Found:</span> <strong>{results.evaluation.semantic.breakdown["Med Completeness"]}/20</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Notes Found:</span> <strong>{results.evaluation.semantic.breakdown["Notes Completeness"]}/15</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>No Hallucinations:</span> <strong>{results.evaluation.semantic.breakdown["No Hallucinations"]}/15</strong></div>
+                      
+                      {results.evaluation.semantic.issues.map((iss, i) => (
+                        <div key={i} style={{ fontSize: '11px', color: '#b91c1c', marginTop: '6px', lineHeight: '1.2' }}>• {iss}</div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+              {/* --- END QA DASHBOARD --- */}
+
               <h2 style={{ display: 'none' }} className="print-only-title">Digital Medical Record</h2>
               
-              {/* --- 1. PATIENT DEMOGRAPHICS --- */}
               <div style={{ marginBottom: '15px' }}>
                 <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Patient Demographics</h4>
                 <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
@@ -172,32 +212,12 @@ export default function PrescriptionScanner() {
                     <div><span style={{ color: '#888' }}>Token / Room:</span> <br/><strong>{results.extracted_data.patient_demographics?.token_number || '-'} / {results.extracted_data.patient_demographics?.room_number || '-'}</strong></div>
                     <div><span style={{ color: '#888' }}>Doctor:</span> <br/><strong>{results.extracted_data.patient_demographics?.doctor_name?.join(', ') || '-'}</strong></div>
                   </div>
-                  
-                  {/* Past Visitation Dates */}
-                  {results.extracted_data.patient_demographics?.recorded_visit_dates?.length > 0 && (
-                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #eee' }}>
-                      <span style={{ color: '#888', fontSize: '12px', display: 'block', marginBottom: '4px' }}>Historical Visits Found:</span>
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                        {results.extracted_data.patient_demographics.recorded_visit_dates.map((date, i) => (
-                          <span key={i} style={{ backgroundColor: '#f1f5f9', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', color: '#475569', border: '1px solid #cbd5e1' }}>
-                            🗓️ {date}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
-              {/* --- 2. VITALS & CLINICAL NOTES --- */}
               <div style={{ marginBottom: '15px' }}>
                 <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Vitals & Clinical Notes</h4>
                 <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee', fontSize: '14px' }}>
-                  <div style={{ display: 'flex', gap: '20px', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px dashed #ddd' }}>
-                    <div><span style={{ color: '#888' }}>BP:</span> <strong>{results.extracted_data.vitals_and_clinical_notes?.blood_pressure || 'N/A'}</strong></div>
-                    <div><span style={{ color: '#888' }}>Pulse:</span> <strong>{results.extracted_data.vitals_and_clinical_notes?.pulse || 'N/A'}</strong></div>
-                  </div>
-                  
                   <div style={{ marginBottom: '6px' }}>
                     <span style={{ color: '#888', fontWeight: 'bold' }}>Chief Complaints:</span> 
                     <p style={{ margin: '2px 0 0 0', paddingLeft: '8px', borderLeft: '3px solid #f59e0b' }}>
@@ -216,7 +236,6 @@ export default function PrescriptionScanner() {
                 </div>
               </div>
 
-              {/* --- 3. LAB INVESTIGATIONS --- */}
               {results.extracted_data.lab_investigations_prescribed?.length > 0 && (
                 <div style={{ marginBottom: '15px' }}>
                   <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Advised Investigations / Scans</h4>
@@ -230,7 +249,6 @@ export default function PrescriptionScanner() {
                 </div>
               )}
 
-              {/* --- 4. MEDICATIONS --- */}
               <div>
                 <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Prescribed Medications</h4>
                 {results.extracted_data.medications?.length > 0 ? (
@@ -243,21 +261,22 @@ export default function PrescriptionScanner() {
                           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
                             ✍️ Written as: <code style={{ backgroundColor: '#f1f5f9', color: '#334155', padding: '2px 4px', borderRadius: '3px', fontWeight: 'bold' }}>{med.raw_shorthand_name}</code>
                           </div>
-                          <div style={{ fontSize: '12px', color: med.cms_mapping_status?.includes("✅") ? '#15803d' : '#b45309', fontWeight: 'bold', marginTop: '4px' }}>
+                          <div style={{ fontSize: '12px', color: med.cms_mapping_status?.includes("✅") ? '#15803d' : '#ef4444', fontWeight: 'bold', marginTop: '4px' }}>
                             {med.cms_mapping_status}: {med.official_cms_drug_name}
                           </div>
                         </div>
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
-                           <div style={{ padding: '3px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', backgroundColor: `${getConfidenceColor(med.confidence_score)}20`, color: getConfidenceColor(med.confidence_score) }}>
-                             AI Confidence: {med.confidence_score}%
-                           </div>
                            {med.associated_icd10_diagnosis && (
                              <span style={{ backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', border: '1px solid #bfdbfe' }}>
                                🏥 {med.associated_icd10_diagnosis}
                              </span>
                            )}
-                           {med.dosage && <span style={{ backgroundColor: '#e9ecef', padding: '3px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold', color: '#495057' }}>{med.dosage}</span>}
+                           {med.dosage && med.dosage.toLowerCase() !== "not specified" && (
+                             <span style={{ backgroundColor: '#e9ecef', padding: '3px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold', color: '#495057' }}>
+                               {med.dosage}
+                             </span>
+                           )}
                         </div>
                       </div>
 
