@@ -185,8 +185,9 @@ export default function PrescriptionScanner() {
                     {/* Layer 2: Semantic AI Critic */}
                     <div style={{ flex: 1, backgroundColor: '#f0fdf4', padding: '10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
                       <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#166534', marginBottom: '8px' }}>👁️ LAYER 2: SEMANTIC AI CRITIC</div>
-                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Meds Found:</span> <strong>{results.evaluation.semantic.breakdown["Med Completeness"]}/20</strong></div>
-                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Notes Found:</span> <strong>{results.evaluation.semantic.breakdown["Notes Completeness"]}/15</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Meds Found:</span> <strong>{results.evaluation.semantic.breakdown["Med Completeness"]}/15</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Notes Found:</span> <strong>{results.evaluation.semantic.breakdown["Notes Completeness"]}/10</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>Instruction Acc:</span> <strong>{results.evaluation.semantic.breakdown["Instruction Accuracy"]}/10</strong></div>
                       <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>No Hallucinations:</span> <strong>{results.evaluation.semantic.breakdown["No Hallucinations"]}/15</strong></div>
                       
                       {results.evaluation.semantic.issues.map((iss, i) => (

@@ -91,13 +91,11 @@ def deterministic_audit(data: dict) -> dict:
     deductions = []
     breakdown = {"Demographics": 10, "CMS Mapping": 20, "ICD-10 Format": 20}
 
-    # 1. Demographics
     if not data.get("patient_demographics", {}).get("doctor_name") or data["patient_demographics"]["doctor_name"][0] == "":
         score -= 10
         breakdown["Demographics"] = 0
         deductions.append("Deterministic: Missing Doctor Name.")
 
-    # 2. Medication Level Validation
     meds = data.get("medications", [])
     if not meds:
         score -= 40
@@ -108,12 +106,10 @@ def deterministic_audit(data: dict) -> dict:
         cms_penalty = 0
         icd_penalty = 0
         for med in meds:
-            # Check CMS Match
             if "Outside Purchase" in med.get("cms_mapping_status", ""):
                 cms_penalty += (20 / len(meds))
                 deductions.append(f"Deterministic: '{med.get('expanded_drug_name')}' failed CMS Database matching.")
                 
-            # STRICT ICD-10 Regex Check
             icd_raw = str(med.get("associated_icd10_diagnosis", "")).strip().upper().split(" ")[0]
             if not re.match(r"^[A-TV-Z][0-9][0-9A-Z](\.[0-9A-Z]{1,4})?$", icd_raw):
                 icd_penalty += (20 / len(meds))
@@ -131,20 +127,24 @@ def perform_semantic_audit(pil_image, extracted_data: dict) -> dict:
     audit_prompt = f"""
     You are an independent, strict Medical QA Auditor AI.
     Your ONLY job is to compare the provided prescription image against the JSON data extracted by a junior AI.
-    You must find omissions (missed text) and hallucinations (invented text).
+    You must find omissions, truncations, unexpanded abbreviations, and oxymorons.
     
     Here is the JSON extracted by the junior AI:
     {json_str}
     
     CRITICAL AUDIT INSTRUCTIONS:
-    1. FLAG OMISSIONS: List any medicines or clinical notes that are visible in the image but MISSING from the JSON.
-    2. FLAG HALLUCINATIONS: List any items in the JSON that are completely INVENTED and not visible in the image.
+    1. FLAG OMISSIONS: List any medicines or clinical notes visible in the image but MISSING from the JSON.
+    2. FLAG UNEXPANDED ABBREVIATIONS & TYPOS: If you see "tas", "tab", "OD", "BD", "TDS", "SOS", or "PC" left unexpanded in the output, YOU MUST FLAG IT.
+    3. CATCH TRUNCATIONS: Read the very end of every medication instruction in the image. If the doctor wrote "before food", "after lunch", etc. and the JSON dropped it, flag it.
+    4. CATCH AFTERNOON HALLUCINATIONS: If the doctor wrote "1-0-1", "1-x-1", "1-X-1", or "BD", there is NO afternoon dose. Flag if "afternoon" appears for these drugs.
+    5. CATCH FREQUENCY OXYMORONS (CRITICAL): If the JSON says "Two tablets in morning, 1 at night, once daily" - THAT IS A CONTRADICTION. You cannot take a drug morning and night AND take it "once daily". Flag any contradictory frequency statements.
     
     REQUIRED SCHEMA (Return ONLY valid JSON):
     {{
         "missed_clinical_notes": ["list missing notes here, or leave empty"],
         "missed_medications": ["list missing medicines here, or leave empty"],
-        "hallucinated_items": ["list made-up items here, or leave empty"],
+        "hallucinated_items": ["list made-up items, contradictory frequencies (oxymorons), or unexpanded abbreviations here"],
+        "truncated_instructions": ["List medications where 'before food' or similar context was cut off"],
         "audit_summary": "Short explanation of your findings."
     }}
     """
@@ -162,45 +162,47 @@ def perform_semantic_audit(pil_image, extracted_data: dict) -> dict:
             if "error" not in audit_data:
                 break
         except Exception as e:
-            print(f"Semantic Audit Retry {attempt+1} (Rate Limit): {e}")
-            time.sleep((attempt + 1) * 6) # Exponential backoff for rate limiting
+            time.sleep((attempt + 1) * 6) 
             
     if not audit_data or "error" in audit_data:
         return {
             "ai_audit_score_out_of_50": 0, 
             "audit_summary": "Semantic AI Audit timed out due to API rate limits.",
-            "breakdown": {"Med Completeness": 0, "Notes Completeness": 0, "No Hallucinations": 0},
+            "breakdown": {"Med Completeness": 0, "Notes Completeness": 0, "No Hallucinations": 0, "Instruction Accuracy": 0},
             "issues": ["API Rate Limit Exhausted during Semantic check."]
         }
         
-    # ELABORATE PYTHON SCORING based on the AI's findings
     score = 50
-    breakdown = {"Med Completeness": 20, "Notes Completeness": 15, "No Hallucinations": 15}
+    breakdown = {"Med Completeness": 15, "Notes Completeness": 10, "No Hallucinations": 15, "Instruction Accuracy": 10}
     issues = []
     
-    # 1. Missed Medications (-10 pts each)
     missed_meds = len(audit_data.get("missed_medications", []))
     if missed_meds > 0:
-        penalty = min(20, missed_meds * 10)
+        penalty = min(15, missed_meds * 7.5)
         breakdown["Med Completeness"] -= penalty
         score -= penalty
         issues.extend([f"Semantic: Missed Medication - {m}" for m in audit_data["missed_medications"]])
         
-    # 2. Missed Notes (-5 pts each)
     missed_notes = len(audit_data.get("missed_clinical_notes", []))
     if missed_notes > 0:
-        penalty = min(15, missed_notes * 5)
+        penalty = min(10, missed_notes * 5)
         breakdown["Notes Completeness"] -= penalty
         score -= penalty
         issues.extend([f"Semantic: Missed Note - {n}" for n in audit_data["missed_clinical_notes"]])
         
-    # 3. Hallucinations (-15 pts if ANY exist)
     hallucinations = len(audit_data.get("hallucinated_items", []))
     if hallucinations > 0:
         penalty = 15
         breakdown["No Hallucinations"] -= penalty
         score -= penalty
-        issues.extend([f"Semantic: Hallucinated Item - {h}" for h in audit_data["hallucinated_items"]])
+        issues.extend([f"Semantic: Contradiction / Typo / Hallucination - {h}" for h in audit_data["hallucinated_items"]])
+
+    truncations = len(audit_data.get("truncated_instructions", []))
+    if truncations > 0:
+        penalty = min(10, truncations * 5)
+        breakdown["Instruction Accuracy"] -= penalty
+        score -= penalty
+        issues.extend([f"Semantic: Truncated Instruction - {t}" for t in audit_data["truncated_instructions"]])
         
     return {
         "ai_audit_score_out_of_50": score,
@@ -219,7 +221,6 @@ async def process_prescription(file: UploadFile = File(...)):
         if img_cv2 is None:
             raise HTTPException(status_code=400, detail="Invalid image upload.")
 
-        # Anonymization
         results = yolo_model(img_cv2, verbose=False)
         for result in results:
             for box in result.boxes:
@@ -232,32 +233,34 @@ async def process_prescription(file: UploadFile = File(...)):
         _, buffer = cv2.imencode('.jpg', img_cv2)
         base64_img_str = f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
         
-        # --- THE EXTRACTOR PROMPT ---
+        # --- THE ELABORATE EXTRACTOR PROMPT ---
         extractor_prompt = f"""
         You are a highly accurate medical OCR system processing an Indian Government Hospital OPD Card.
         Your job is EXHAUSTIVE EXTRACTION. Scan Top-to-Bottom. Do NOT hallucinate.
 
         CRITICAL RULES:
-        1. TOP HEADER: Extract Doctor's Name, Hospital, Dept, Token No, Room No, and Demographics. 
-        2. LEFT COLUMN: Extract ALL clinical notes. Put complaints (C/O) in `chief_complaints`. Put everything else (O/E, P/V, P/S, LMP, Adv) in `other_notes`.
-        3. RIGHT COLUMN: Extract every numbered item. Lab Tests go into `lab_investigations_prescribed`. Medications go into `medications`.
-        4. STRICT ICD-10 MANDATE: Provide a strictly formatted alphanumeric ICD-10 code (e.g., E11.9) for EVERY medication. Must start with a letter and have a decimal. Use R52.9 for unknown pain, E56.9 for vitamins if unsure. DO NOT invent fake letters.
-        
-        5. EXPAND ALL ABBREVIATIONS TO FULL TEXT (MANDATORY):
-           - You MUST NOT output abbreviations like "ODAC", "BD", "SOS", or "P/V" in your final JSON. 
-           - You MUST expand them into full English phrases using the dictionary below.
-           - Example: If written "ODAC", output "Once daily before meals". If "SOS", output "As needed".
+        1. OCR TYPO CORRECTION: If you read "tas", "tal", or "tab", auto-correct and expand it to "tablet" or "tablets". 
+        2. NO FREQUENCY CONTRADICTIONS: DO NOT combine terms that conflict. If a drug is taken "1 in morning, 1 at night", it is TWICE DAILY. Do NOT append "Once Daily" to a multi-dose schedule. If you use a dash notation, translate it literally and STOP.
+        3. NO DOSAGE HALLUCINATIONS: Only extract a dosage if explicitly written in brackets (e.g., '(1G)', '(40)', '500mg'). DO NOT assume dosages.
+        4. ZERO AFTERNOON HALLUCINATION: The middle digit in dash notation is the afternoon dose. Unless you see "1-1-1" or "TDS", DO NOT output the word "afternoon".
+        5. NEVER TRUNCATE INSTRUCTIONS: Read to the very end of the line. If the doctor writes "before food", you MUST include it.
+        6. STRICT ICD-10 MANDATE: Provide an alphanumeric ICD-10 code (e.g., E11.9) for EVERY medication.
 
-        --- SPREADSHEET ABBREVIATION DICTIONARY ---
-        * SYMPTOMS/NOTES: C/O -> Complains of, O/E -> On examination, K/c/o -> Known case of, H/o -> History of, P/V -> Per Vaginam, P/S -> Per Speculum, LMP -> Last Menstrual Period, LBP -> Lower Back Pain, W/A -> Whole Abdomen, L/A -> Lower Abdomen
-        * FORMULATIONS: T/Tab -> Tablet, Syp/Syr -> Syrup, Cap -> Capsule, Inj -> Injection, E/D -> Eye Drop, Oint/Gel -> Ointment
-        * BASE TIMINGS: OD -> Once Daily, BD/BID -> Twice Daily, TDS/TID -> Thrice Daily, QDS -> Four Times a Day, HS/BT -> At Bedtime, AC/BBF -> Before Meals, PC -> After Meals, SOS -> As needed, Stat -> Immediately.
-        * COMPOUND TIMINGS: ODAC -> Once daily before meals, ODPC -> Once daily after meals, BDAC -> Twice daily before meals, BDPC -> Twice daily after meals, TDSPC -> Thrice daily after meals.
-        * DASH NOTATION: 1-1-1 -> 1 morning, 1 afternoon, 1 night | 1-0-1 -> 1 morning, skip afternoon, 1 night | 1-0-0 -> 1 morning only.
+        --- DIABETIC & INDIAN DOCTOR HANDWRITING DICTIONARY ---
+        Recognize these notoriously messy handwriting patterns:
+        * DRUGS: MFN -> Metformin, Glime/Taline -> Glimepiride, Vogbi/Vogli -> Voglibose, Dabz/Dapa -> Dapagliflozin, Tendli/Tendeli -> Teneligliptin.
+        * FORMULATIONS: T/Tab/Tas/Tal -> Tablet, Syp/Syr -> Syrup, Cap -> Capsule, Inj -> Injection.
+        * TIMINGS: OD -> Once Daily, BD/BID -> Twice Daily, TDS/TID -> Thrice Daily, QDS -> Four Times a Day, HS/BT -> At Bedtime, AC/BBF -> Before Meals, PC -> After Meals, SOS -> As needed.
+        * COMPOUND TIMINGS: ODAC -> Once daily before meals, ODPC -> Once daily after meals, BDAC -> Twice daily before meals, BDPC -> Twice daily after meals.
+        * STRICT DASH & X NOTATION: 
+          - 1-1-1 -> 1 in the morning, 1 in the afternoon, 1 at night
+          - 1-0-1 OR 1-X-1 OR 1-x-1 -> 1 in the morning, skip afternoon, 1 at night
+          - 1-0-0 OR 1-X-X OR 1-x-x -> 1 in the morning only
+          - 0-0-1 OR X-X-1 OR x-x-1 -> 1 at night only
+          - X-1-1 OR x-1-1 -> skip morning, 1 in the afternoon, 1 at night
 
         --- DYNAMIC CMS DATABASE ---
         Map the doctor's handwriting to the closest matching drug from THIS LIST ONLY. 
-        Extract the numeric strength (e.g., '40mg', '500mg') into the `dosage` field.
         {CMS_PROMPT_STRING}
 
         REQUIRED SCHEMA (Return ONLY valid JSON):
@@ -291,25 +294,37 @@ async def process_prescription(file: UploadFile = File(...)):
         if "error" in extracted_data:
             return {"status": "failed", "step": "extraction", "details": extracted_data}
 
-        # --- CMS MAPPING ---
+        # --- DOSAGE-AWARE CMS MAPPING ---
         if CMS_DRUG_LIST and "medications" in extracted_data:
             for med in extracted_data["medications"]:
                 raw_expanded = str(med.get("expanded_drug_name", "")).strip().title()
+                raw_dosage = str(med.get("dosage", "")).strip().lower().replace(" ", "")
                 best_match = None
                 
+                # Check 1: Strict Match (Name AND Dosage in the CMS string)
                 for official_drug in CMS_DRUG_LIST:
-                    if raw_expanded.lower() == official_drug.lower():
+                    off_lower = official_drug.lower().replace(" ", "")
+                    if raw_expanded.lower() in official_drug.lower() and raw_dosage in off_lower and raw_dosage != "notspecified":
                         best_match = official_drug
                         break
+                        
+                # Check 2: Name Only Match (If dosage specific match fails)
                 if not best_match:
                     for official_drug in CMS_DRUG_LIST:
                         if raw_expanded.lower() in official_drug.lower() and len(raw_expanded) > 4:
                             best_match = official_drug
                             break
+                            
+                # Check 3: Fuzzy Match (With anti-dosage penalty)
                 if not best_match:
-                    fuzzy_matches = difflib.get_close_matches(raw_expanded, CMS_DRUG_LIST, n=1, cutoff=0.55)
-                    if fuzzy_matches:
-                        best_match = fuzzy_matches[0]
+                    fuzzy_matches = difflib.get_close_matches(raw_expanded, CMS_DRUG_LIST, n=3, cutoff=0.55)
+                    for f_match in fuzzy_matches:
+                        # Prevent mapping "Taline (2)" to "Glimepiride 4mg". If dosage is wrong, skip it.
+                        if raw_dosage in f_match.lower().replace(" ", "") or not re.search(r'\d', f_match):
+                            best_match = f_match
+                            break
+                    if not best_match and fuzzy_matches:
+                        best_match = fuzzy_matches[0] # Fallback
                 
                 if best_match:
                     med["official_cms_drug_name"] = best_match
@@ -319,13 +334,9 @@ async def process_prescription(file: UploadFile = File(...)):
                     med["cms_mapping_status"] = "⚠️ Outside Purchase"
 
         # --- MULTI-AGENT EVALUATION PIPELINE ---
-        print("Running Deterministic Audit...")
         deterministic_report = deterministic_audit(extracted_data)
-        
-        print("Running Semantic AI Audit...")
         semantic_report = await asyncio.to_thread(perform_semantic_audit, pil_image, extracted_data)
         
-        # Calculate Final 100-Point Grade
         final_score = deterministic_report["score"] + semantic_report.get("ai_audit_score_out_of_50", 0)
         
         if final_score >= 90: grade = "Excellent"
