@@ -56,44 +56,62 @@ def clean_json(text: str) -> dict:
     try: return json.loads(text.replace('```json', '').replace('```', '').strip())
     except: return {"error": "Failed to parse JSON", "raw": text}
 
-# --- AUDITORS ---
+def parse_api_error(e: Exception) -> str:
+    error_str = str(e).upper()
+    if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "QUOTA" in error_str:
+        return "API Quota Exceeded: Daily free-tier limit reached."
+    elif "401" in error_str or "403" in error_str or "API_KEY" in error_str:
+        return "Authentication Error: Invalid API Key."
+    else: return f"API Error: {str(e)}"
+
+# --- STRICT EXTRACTION AUDITORS ---
+
 def deterministic_audit(data: dict) -> dict:
+    """LAYER 1: Evaluates structural integrity, demographics, and formatting (Max 50 Points)"""
     score, deductions = 50, []
-    bdown = {"Demographics": 10, "CMS Mapping": 20, "ICD-10 Format": 20}
+    bdown = {"Demographics & Integrity": 20, "CMS Mapping": 15, "ICD-10 Format": 15}
 
-    if not data.get("patient_demographics", {}).get("doctor_name") or data["patient_demographics"]["doctor_name"][0] == "":
-        score -= 10; bdown["Demographics"] = 0; deductions.append("Missing Doctor Name.")
-
+    demo = data.get("patient_demographics", {})
+    if not demo.get("doctor_name") or demo["doctor_name"][0] == "":
+        score -= 10; bdown["Demographics & Integrity"] -= 10; deductions.append("Missing Doctor Name.")
+    
     meds = data.get("medications", [])
     if not meds:
-        return {"score": 10, "breakdown": {"Demographics": 0, "CMS Mapping": 0, "ICD-10 Format": 0}, "issues": ["CRITICAL: No medications extracted."]}
+        return {"score": 10, "breakdown": {"Demographics & Integrity": 0, "CMS Mapping": 0, "ICD-10 Format": 0}, "issues": ["CRITICAL: No medications extracted."]}
 
     cms_pen, icd_pen = 0, 0
     for m in meds:
         if "Outside Purchase" in m.get("cms_mapping_status", "") and "Unknown" not in m.get("expanded_drug_name", ""):
-            cms_pen += (20 / len(meds)); deductions.append(f"'{m.get('expanded_drug_name')}' failed CMS Database matching.")
+            cms_pen += (15 / len(meds)); deductions.append(f"'{m.get('expanded_drug_name')}' failed CMS Database matching.")
             
         icd = str(m.get("associated_icd10_diagnosis", "")).strip().upper().split(" ")[0]
         if not re.match(r"^[A-TV-Z][0-9][0-9A-Z](\.[0-9A-Z]{1,4})?$", icd):
-            icd_pen += (20 / len(meds)); deductions.append(f"Invalid ICD-10 format for '{m.get('expanded_drug_name')}'.")
+            icd_pen += (15 / len(meds)); deductions.append(f"Invalid ICD-10 format for '{m.get('expanded_drug_name')}'.")
 
-    bdown["CMS Mapping"], bdown["ICD-10 Format"] = max(0, 20 - cms_pen), max(0, 20 - icd_pen)
+    bdown["CMS Mapping"], bdown["ICD-10 Format"] = max(0, 15 - cms_pen), max(0, 15 - icd_pen)
     return {"score": int(round(score - cms_pen - icd_pen)), "breakdown": bdown, "issues": deductions}
 
 def semantic_audit(pil_image, data: dict) -> dict:
+    """LAYER 2: Visual cross-referencing AI to catch extraction errors (Max 50 Points)"""
     prompt = f"""
-    Compare this image to the JSON: {json.dumps(data)}
-    1. MISSING MEDS: Count lines in image vs JSON. Flag omissions.
-    2. TRUNCATIONS: Flag if durations ("x 20") or dosages are dropped.
-    Return JSON: {{"missed_medications": [], "hallucinated_items": [], "truncated_instructions": [], "audit_summary": ""}}
+    You are a Strict QA Auditor evaluating the EXTRACTION QUALITY of this JSON: {json.dumps(data)} against the image.
+    DO NOT judge the doctor's decisions. ONLY judge if the AI correctly transcribed what is on the paper.
+
+    1. OMISSIONS (MISSING MEDS): Count the handwritten lines. Did the JSON drop or skip any medications?
+    2. HALLUCINATIONS: Did the AI invent drugs, dosages, or instructions that are NOT physically written on the page?
+    3. TRUNCATIONS: Were critical markers like "x 20", "x 1m", or trailing numbers dropped from the JSON?
+    4. TRANSLATION ERRORS: Did the AI misinterpret the shorthand? (e.g., The image says '1-0-1' but the JSON incorrectly says 'Afternoon', or the image says 'OD' but JSON says 'Twice daily').
+
+    Return EXACT JSON: {{"missed_medications": [], "hallucinated_items": [], "truncated_instructions": [], "translation_errors": [], "audit_summary": ""}}
     """
     try:
         res = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=[prompt, pil_image], config=types.GenerateContentConfig(response_mime_type="application/json"))
         aud = clean_json(res.text)
-    except: return {"ai_audit_score_out_of_50": 0, "issues": ["Semantic Audit failed."]}
+    except Exception as e: 
+        return {"ai_audit_score_out_of_50": 0, "issues": [f"Semantic Audit failed: {parse_api_error(e)}"]}
 
-    score, bdown, issues = 50, {"Med Completeness": 15, "Notes Completeness": 10, "No Hallucinations": 15, "Instruction Accuracy": 10}, []
-    for key, pen_val, b_key in [("missed_medications", 7.5, "Med Completeness"), ("hallucinated_items", 15, " No Hallucinations"), ("truncated_instructions", 5, "Instruction Accuracy")]:
+    score, bdown, issues = 50, {"Med Completeness": 15, "No Hallucinations": 15, "Instruction Acc": 10, "Translation Acc": 10}, []
+    for key, pen_val, b_key in [("missed_medications", 7.5, "Med Completeness"), ("hallucinated_items", 15, "No Hallucinations"), ("truncated_instructions", 5, "Instruction Acc"), ("translation_errors", 5, "Translation Acc")]:
         if items := aud.get(key, []):
             pen = min(bdown[b_key], len(items) * pen_val)
             bdown[b_key] -= pen; score -= pen
@@ -104,42 +122,49 @@ def semantic_audit(pil_image, data: dict) -> dict:
 @app.post("/api/process-prescription")
 async def process_prescription(file: UploadFile = File(...)):
     try:
-        img_cv2 = cv2.imdecode(np.frombuffer(await file.read(), np.uint8), cv2.IMREAD_COLOR)
-        if img_cv2 is None: raise HTTPException(400, "Invalid image upload.")
+        file_bytes = await file.read()
+        np_arr = np.frombuffer(file_bytes, np.uint8)
+        img_cv2 = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        
+        if img_cv2 is None: raise HTTPException(400, "Invalid image upload. Please upload a standard JPEG or PNG.")
 
-        # --- STRICT YOLO REDACTION SAFEGUARD ---
+        # --- YOLO REDACTION SAFEGUARD ---
         total_area = img_cv2.shape[0] * img_cv2.shape[1]
         redaction_count = 0
-        MAX_REDACTIONS = 3  # Force YOLO to only draw a maximum of 3 boxes
+        MAX_REDACTIONS = 3  
 
         for res in yolo_model(img_cv2, verbose=False):
-            # Sort boxes by confidence so we only redact the AI's absolute best guesses
             boxes = sorted(res.boxes, key=lambda x: x.conf[0].item(), reverse=True)
             for box in boxes:
-                if redaction_count >= MAX_REDACTIONS:
-                    break 
+                if redaction_count >= MAX_REDACTIONS: break 
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
-                box_area = (x2 - x1) * (y2 - y1)
-                
-                # Must be smaller than 5% of the page to prevent "black screen"
-                if box_area < (total_area * 0.05):
+                if ((x2 - x1) * (y2 - y1)) < (total_area * 0.05):
                     cv2.rectangle(img_cv2, (x1, y1), (x2, y2), (0, 0, 0), -1)
                     redaction_count += 1
 
-        pil_image = Image.fromarray(cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB))
-        base64_img = f"data:image/jpeg;base64,{base64.b64encode(cv2.imencode('.jpg', img_cv2)[1]).decode('utf-8')}"
+        # --- PIL IMAGE CONVERSION (FIXES BLACK SCREEN) ---
+        img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(img_rgb)
+        buffered = io.BytesIO()
+        pil_image.save(buffered, format="JPEG", quality=85)
+        base64_img = f"data:image/jpeg;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
 
-        # --- PURE TRANSCRIPTION PROMPT (WITH CHAIN OF THOUGHT) ---
+        # --- THE STRICT TRANSCRIBER & INTERPRETER PROMPT ---
         extractor_prompt = f"""
-        You are an expert Clinical Transcriber. Your ONLY job is to transcribe the image EXACTLY as written. 
-        DO NOT hallucinate drugs. DO NOT correct spelling. Just read the ink.
+        You are an expert Clinical Transcriber. Your ONLY job is to transcribe the image EXACTLY as written and interpret the medical shorthand clearly. 
+        DO NOT hallucinate drugs. DO NOT infer missing medical decisions. Just read the ink.
 
         CRITICAL RULES:
         1. CHAIN OF THOUGHT: Before structuring the JSON, populate the `step_1_raw_medication_lines` array. Transcribe every single line of medication you see exactly as it appears. Do not skip any.
-        2. Count the physical lines. If there are 6 lines, you MUST output 6 objects in the `medications` array.
-        3. Extract raw names literally (e.g., 'T- Panto', 'opem', 'Atorru (10)', 'Thyronine').
-        4. Extract numbers in brackets as 'dosage'. If missing, write "Not specified".
-        5. Transcribe 'frequency_and_duration' exactly (e.g. 'on x 20', 'ODHS X 1m').
+        2. EXHAUSTIVE EXTRACTION: Count the physical lines. If there are 6 lines, you MUST output 6 objects in the `medications` array.
+        3. RAW NAMES: Extract raw drug names literally (e.g., 'T- Panto', 'opem', 'Atorru', 'Thyronine').
+        4. DOSAGE HUNTING: Extract numbers in brackets or after dashes as 'dosage' (e.g., (10) -> 10mg). If missing, strictly write "Not specified". DO NOT GUESS DOSAGES.
+        5. SMART INSTRUCTION INTERPRETATION (CRITICAL): 
+           - Frequency: Translate 'OD' (Once daily), 'BD' (Twice daily), 'TDS' (Thrice daily), 'QDS' (Four times daily).
+           - Dash Notation: Translate strictly. '1-0-1' -> '1 morning, skip afternoon, 1 night'. '1-1-1' -> '1 morning, 1 afternoon, 1 night'.
+           - Duration: Translate 'x 20' -> 'for 20 days', 'x 1m' -> 'for 1 month', 'x 5d' -> 'for 5 days'. 
+           - Combine Frequency + Duration into the `frequency_and_duration` field (e.g., "Once daily for 20 days").
+           - Timings: Look for meal/time markers like 'AC' (Before meals), 'PC' (After meals), 'BBF' (Before breakfast), 'HS' (At bedtime). Put these clearly in the `special_instructions` field. If none, write "Not specified".
         6. Assign a standard ICD-10 code (e.g., E11.9, K21.9).
 
         Return strictly valid JSON matching this schema:
@@ -156,12 +181,19 @@ async def process_prescription(file: UploadFile = File(...)):
         }}
         """
 
+        ext_data = {"error": "Extraction failed. Gemini API may be down or rate limited."}
+        
         for attempt in range(3):
             try:
                 res = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=[extractor_prompt, pil_image], config=types.GenerateContentConfig(response_mime_type="application/json"))
                 ext_data = clean_json(res.text)
                 if "error" not in ext_data: break
-            except: time.sleep((attempt + 1) * 3)
+            except Exception as e: 
+                friendly_error = parse_api_error(e)
+                print(f"Gemini API Request Failed (Attempt {attempt+1}): {friendly_error}")
+                ext_data = {"error": friendly_error}
+                if "Quota" in friendly_error or "Authentication" in friendly_error: break
+                time.sleep((attempt + 1) * 3)
 
         if "error" in ext_data: return {"status": "failed", "details": ext_data}
 
@@ -181,7 +213,7 @@ async def process_prescription(file: UploadFile = File(...)):
                 name = str(m.get("expanded_drug_name", "")).strip().title()
                 dos = str(m.get("dosage", "")).strip().lower().replace(" ", "")
                 
-                # 1. Apply Deterministic Fixes (Replaces 'opem' with 'Ondansetron')
+                # 1. Apply Deterministic Fixes
                 for typo, fix in ocr_fixes.items():
                     if re.search(rf'\b{typo}\b', raw_name) or re.search(rf'\b{typo}\b', name.lower()):
                         name = fix; m["expanded_drug_name"] = fix

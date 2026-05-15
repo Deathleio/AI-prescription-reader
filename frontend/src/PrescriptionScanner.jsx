@@ -5,7 +5,7 @@ export default function PrescriptionScanner() {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
-  const [isCustomerMode, setIsCustomerMode] = useState(true); 
+  const [showValidation, setShowValidation] = useState(false); 
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -110,14 +110,21 @@ export default function PrescriptionScanner() {
 
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto', fontFamily: 'sans-serif', padding: '20px', position: 'relative' }}>
-      <style>{`@media print { .no-print { display: none !important; } body { background-color: #fff; } .print-clean { box-shadow: none !important; border: none !important; } }`}</style>
+      <style>{`
+        @media print { 
+          .no-print { display: none !important; } 
+          body { background-color: #fff; } 
+          .print-clean { box-shadow: none !important; border: none !important; } 
+          .force-print { display: block !important; } 
+        }
+      `}</style>
 
       <button 
-        onClick={() => setIsCustomerMode(!isCustomerMode)}
+        onClick={() => setShowValidation(!showValidation)}
         className="no-print"
-        style={{ position: 'absolute', top: '20px', right: '20px', padding: '8px 12px', fontSize: '12px', cursor: 'pointer', backgroundColor: isCustomerMode ? '#e2e8f0' : '#3b82f6', color: isCustomerMode ? '#475569' : '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}
+        style={{ position: 'absolute', top: '20px', right: '20px', padding: '8px 12px', fontSize: '12px', cursor: 'pointer', backgroundColor: showValidation ? '#e2e8f0' : '#3b82f6', color: showValidation ? '#475569' : '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}
       >
-        {isCustomerMode ? '👁️ Enable Validation View' : '🙈 Hide Validation'}
+        {showValidation ? '🙈 Hide Validation View' : '👁️ Enable Validation View'}
       </button>
 
       <h2 className="no-print" style={{ textAlign: 'center', color: '#333', marginTop: '10px' }}>AI Prescription Digitization</h2>
@@ -141,7 +148,7 @@ export default function PrescriptionScanner() {
         </div>
 
         <div style={{ flex: '1 1 500px' }}>
-          {results && results.status === 'success' && (
+          {results?.status === 'success' && (
             <div className="print-clean" style={{ backgroundColor: '#f8f9fa', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
               
               <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #007bff', paddingBottom: '10px', marginBottom: '15px' }}>
@@ -153,19 +160,19 @@ export default function PrescriptionScanner() {
                 </div>
               </div>
 
-              {/* --- DUAL-LAYER QA EVALUATION DASHBOARD --- */}
-              {results.evaluation && isCustomerMode && (
-                <div className="no-print" style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#fff', border: `1px solid ${getScoreColor(results.evaluation.score)}`, borderRadius: '8px', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+              {/* --- DUAL-LAYER QA EVALUATION DASHBOARD (Safeguarded with optional chaining) --- */}
+              {results.evaluation && (
+                <div className="force-print" style={{ display: showValidation ? 'block' : 'none', marginBottom: '20px', padding: '15px', backgroundColor: '#fff', border: `1px solid ${getScoreColor(results.evaluation.score)}`, borderRadius: '8px', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
                   
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '15px' }}>
                      <div>
                        <h4 style={{ margin: '0 0 4px 0', color: '#333', fontSize: '16px' }}>Extraction Quality Score</h4>
                        <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', backgroundColor: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
-                         {results.evaluation.grade}
+                         {results.evaluation.grade || "Unknown"}
                        </span>
                      </div>
-                     <div style={{ fontSize: '28px', fontWeight: 'bold', color: getScoreColor(results.evaluation.score) }}>
-                       {results.evaluation.score}<span style={{ fontSize: '16px', color: '#94a3b8' }}>/100</span>
+                     <div style={{ fontSize: '28px', fontWeight: 'bold', color: getScoreColor(results.evaluation.score || 0) }}>
+                       {results.evaluation.score || 0}<span style={{ fontSize: '16px', color: '#94a3b8' }}>/100</span>
                      </div>
                   </div>
                   
@@ -173,11 +180,11 @@ export default function PrescriptionScanner() {
                     {/* Layer 1: Python Deterministic */}
                     <div style={{ flex: 1, backgroundColor: '#f8fafc', padding: '10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
                       <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '8px' }}>🤖 LAYER 1: STRICT REGEX AUDITOR</div>
-                      <div style={{ fontSize: '12px', color: '#334155', display: 'flex', justifyContent: 'space-between' }}><span>CMS Mapping:</span> <strong>{results.evaluation.deterministic.breakdown["CMS Mapping"]}/20</strong></div>
-                      <div style={{ fontSize: '12px', color: '#334155', display: 'flex', justifyContent: 'space-between' }}><span>ICD-10 Format:</span> <strong>{results.evaluation.deterministic.breakdown["ICD-10 Format"]}/20</strong></div>
-                      <div style={{ fontSize: '12px', color: '#334155', display: 'flex', justifyContent: 'space-between' }}><span>Demographics:</span> <strong>{results.evaluation.deterministic.breakdown["Demographics"]}/10</strong></div>
+                      <div style={{ fontSize: '12px', color: '#334155', display: 'flex', justifyContent: 'space-between' }}><span>CMS Mapping:</span> <strong>{results.evaluation.deterministic?.breakdown?.["CMS Mapping"] ?? 0}/20</strong></div>
+                      <div style={{ fontSize: '12px', color: '#334155', display: 'flex', justifyContent: 'space-between' }}><span>ICD-10 Format:</span> <strong>{results.evaluation.deterministic?.breakdown?.["ICD-10 Format"] ?? 0}/20</strong></div>
+                      <div style={{ fontSize: '12px', color: '#334155', display: 'flex', justifyContent: 'space-between' }}><span>Demographics:</span> <strong>{results.evaluation.deterministic?.breakdown?.["Demographics"] ?? 0}/10</strong></div>
                       
-                      {results.evaluation.deterministic.issues.map((iss, i) => (
+                      {results.evaluation.deterministic?.issues?.map((iss, i) => (
                         <div key={i} style={{ fontSize: '11px', color: '#b91c1c', marginTop: '6px', lineHeight: '1.2' }}>• {iss}</div>
                       ))}
                     </div>
@@ -185,12 +192,12 @@ export default function PrescriptionScanner() {
                     {/* Layer 2: Semantic AI Critic */}
                     <div style={{ flex: 1, backgroundColor: '#f0fdf4', padding: '10px', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
                       <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#166534', marginBottom: '8px' }}>👁️ LAYER 2: SEMANTIC AI CRITIC</div>
-                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Meds Found:</span> <strong>{results.evaluation.semantic.breakdown["Med Completeness"]}/15</strong></div>
-                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Notes Found:</span> <strong>{results.evaluation.semantic.breakdown["Notes Completeness"]}/10</strong></div>
-                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>Instruction Acc:</span> <strong>{results.evaluation.semantic.breakdown["Instruction Accuracy"]}/10</strong></div>
-                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>Hallucinations:</span> <strong>{results.evaluation.semantic.breakdown["No Hallucinations"]}/15</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Meds Found:</span> <strong>{results.evaluation.semantic?.breakdown?.["Med Completeness"] ?? 0}/15</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Notes Found:</span> <strong>{results.evaluation.semantic?.breakdown?.["Notes Completeness"] ?? 0}/10</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>Instruction Acc:</span> <strong>{results.evaluation.semantic?.breakdown?.["Instruction Accuracy"] ?? 0}/10</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>Hallucinations:</span> <strong>{results.evaluation.semantic?.breakdown?.["No Hallucinations"] ?? 0}/15</strong></div>
                       
-                      {results.evaluation.semantic.issues.map((iss, i) => (
+                      {results.evaluation.semantic?.issues?.map((iss, i) => (
                         <div key={i} style={{ fontSize: '11px', color: '#b91c1c', marginTop: '6px', lineHeight: '1.2' }}>• {iss}</div>
                       ))}
                     </div>
@@ -198,20 +205,19 @@ export default function PrescriptionScanner() {
 
                 </div>
               )}
-              {/* --- END QA DASHBOARD --- */}
 
-              <h2 style={{ display: 'none' }} className="print-only-title">Digital Medical Record</h2>
+              <h2 style={{ display: 'none' }} className="print-only-title force-print">Digital Medical Record</h2>
               
               <div style={{ marginBottom: '15px' }}>
                 <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Patient Demographics</h4>
                 <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '14px' }}>
-                    <div><span style={{ color: '#888' }}>Name:</span> <br/><strong>{results.extracted_data.patient_demographics?.name || 'N/A'}</strong></div>
-                    <div><span style={{ color: '#888' }}>Age/Sex:</span> <br/><strong>{results.extracted_data.patient_demographics?.age || '-'} / {results.extracted_data.patient_demographics?.gender || '-'}</strong></div>
-                    <div><span style={{ color: '#888' }}>Reg/Health ID:</span> <br/><strong>{results.extracted_data.patient_demographics?.registration_number || '-'}</strong></div>
-                    <div><span style={{ color: '#888' }}>Latest Visit Date:</span> <br/><strong>{results.extracted_data.patient_demographics?.visit_date || '-'}</strong></div>
-                    <div><span style={{ color: '#888' }}>Token / Room:</span> <br/><strong>{results.extracted_data.patient_demographics?.token_number || '-'} / {results.extracted_data.patient_demographics?.room_number || '-'}</strong></div>
-                    <div><span style={{ color: '#888' }}>Doctor:</span> <br/><strong>{results.extracted_data.patient_demographics?.doctor_name?.join(', ') || '-'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Name:</span> <br/><strong>{results.extracted_data?.patient_demographics?.name || 'N/A'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Age/Sex:</span> <br/><strong>{results.extracted_data?.patient_demographics?.age || '-'} / {results.extracted_data?.patient_demographics?.gender || '-'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Reg/Health ID:</span> <br/><strong>{results.extracted_data?.patient_demographics?.registration_number || '-'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Latest Visit Date:</span> <br/><strong>{results.extracted_data?.patient_demographics?.visit_date || '-'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Token / Room:</span> <br/><strong>{results.extracted_data?.patient_demographics?.token_number || '-'} / {results.extracted_data?.patient_demographics?.room_number || '-'}</strong></div>
+                    <div><span style={{ color: '#888' }}>Doctor:</span> <br/><strong>{results.extracted_data?.patient_demographics?.doctor_name?.join(', ') || '-'}</strong></div>
                   </div>
                 </div>
               </div>
@@ -222,11 +228,11 @@ export default function PrescriptionScanner() {
                   <div style={{ marginBottom: '6px' }}>
                     <span style={{ color: '#888', fontWeight: 'bold' }}>Chief Complaints:</span> 
                     <p style={{ margin: '2px 0 0 0', paddingLeft: '8px', borderLeft: '3px solid #f59e0b' }}>
-                      {results.extracted_data.vitals_and_clinical_notes?.chief_complaints?.join(', ') || 'None noted'}
+                      {results.extracted_data?.vitals_and_clinical_notes?.chief_complaints?.join(', ') || 'None noted'}
                     </p>
                   </div>
 
-                  {results.extracted_data.vitals_and_clinical_notes?.other_notes && (
+                  {results.extracted_data?.vitals_and_clinical_notes?.other_notes && (
                     <div style={{ marginTop: '8px' }}>
                       <span style={{ color: '#888', fontWeight: 'bold' }}>Other Findings / Notes:</span> 
                       <p style={{ margin: '2px 0 0 0', paddingLeft: '8px', borderLeft: '3px solid #3b82f6', whiteSpace: 'pre-wrap' }}>
@@ -237,7 +243,7 @@ export default function PrescriptionScanner() {
                 </div>
               </div>
 
-              {results.extracted_data.lab_investigations_prescribed?.length > 0 && (
+              {results.extracted_data?.lab_investigations_prescribed?.length > 0 && (
                 <div style={{ marginBottom: '15px' }}>
                   <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Advised Investigations / Scans</h4>
                   <div style={{ backgroundColor: '#fff', padding: '10px', borderRadius: '6px', border: '1px solid #eee' }}>
@@ -252,18 +258,18 @@ export default function PrescriptionScanner() {
 
               <div>
                 <h4 style={{ margin: '0 0 10px 0', color: '#555', textTransform: 'uppercase', fontSize: '12px' }}>Prescribed Medications</h4>
-                {results.extracted_data.medications?.length > 0 ? (
+                {Array.isArray(results.extracted_data?.medications) && results.extracted_data.medications.length > 0 ? (
                   results.extracted_data.medications.map((med, index) => (
                     <div key={index} style={{ marginBottom: '10px', padding: '12px', backgroundColor: '#fff', border: '1px solid #eee', borderLeft: '4px solid #007bff', borderRadius: '4px' }}>
                       
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
-                          <strong style={{ fontSize: '16px', color: '#222' }}>{med.expanded_drug_name}</strong>
+                          <strong style={{ fontSize: '16px', color: '#222' }}>{med.expanded_drug_name || 'Unknown'}</strong>
                           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                            ✍️ Written as: <code style={{ backgroundColor: '#f1f5f9', color: '#334155', padding: '2px 4px', borderRadius: '3px', fontWeight: 'bold' }}>{med.raw_shorthand_name}</code>
+                            ✍️ Written as: <code style={{ backgroundColor: '#f1f5f9', color: '#334155', padding: '2px 4px', borderRadius: '3px', fontWeight: 'bold' }}>{med.raw_shorthand_name || 'N/A'}</code>
                           </div>
                           <div style={{ fontSize: '12px', color: med.cms_mapping_status?.includes("✅") ? '#15803d' : '#ef4444', fontWeight: 'bold', marginTop: '4px' }}>
-                            {med.cms_mapping_status}: {med.official_cms_drug_name}
+                            {med.cms_mapping_status || 'Unknown Status'}: {med.official_cms_drug_name || 'N/A'}
                           </div>
                         </div>
 
@@ -283,7 +289,7 @@ export default function PrescriptionScanner() {
 
                       <div style={{ fontSize: '13px', color: '#555', lineHeight: '1.5', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #f8f9fa' }}>
                         <div><span style={{ color: '#888' }}>Frequency:</span> <strong>{med.frequency_and_duration || 'Not specified'}</strong></div>
-                        {med.special_instructions && (
+                        {med.special_instructions && med.special_instructions !== "Not specified" && (
                           <div style={{ marginTop: '4px', color: '#d35400' }}><span style={{ fontWeight: 'bold' }}>Instructions:</span> {med.special_instructions}</div>
                         )}
                       </div>
