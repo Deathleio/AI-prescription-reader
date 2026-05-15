@@ -64,16 +64,16 @@ def parse_api_error(e: Exception) -> str:
         return "Authentication Error: Invalid API Key."
     else: return f"API Error: {str(e)}"
 
-# --- STRICT EXTRACTION AUDITORS ---
+# --- STRICT ACADEMIC AUDITORS ---
 
 def deterministic_audit(data: dict) -> dict:
-    """LAYER 1: Evaluates structural integrity, demographics, and formatting (Max 50 Points)"""
+    """LAYER 1: Python Structural Evaluator (Max 50 Points)"""
     score, deductions = 50, []
     bdown = {"Demographics & Integrity": 20, "CMS Mapping": 15, "ICD-10 Format": 15}
 
     demo = data.get("patient_demographics", {})
     if not demo.get("doctor_name") or demo["doctor_name"][0] == "":
-        score -= 10; bdown["Demographics & Integrity"] -= 10; deductions.append("Missing Doctor Name.")
+        score -= 10; bdown["Demographics & Integrity"] -= 10; deductions.append("[Omission] Missing Doctor Name.")
     
     meds = data.get("medications", [])
     if not meds:
@@ -82,40 +82,73 @@ def deterministic_audit(data: dict) -> dict:
     cms_pen, icd_pen = 0, 0
     for m in meds:
         if "Outside Purchase" in m.get("cms_mapping_status", "") and "Unknown" not in m.get("expanded_drug_name", ""):
-            cms_pen += (15 / len(meds)); deductions.append(f"'{m.get('expanded_drug_name')}' failed CMS Database matching.")
+            cms_pen += (15 / len(meds)); deductions.append(f"[CMS Failure] '{m.get('expanded_drug_name')}' failed database grounding.")
             
         icd = str(m.get("associated_icd10_diagnosis", "")).strip().upper().split(" ")[0]
-        if not re.match(r"^[A-TV-Z][0-9][0-9A-Z](\.[0-9A-Z]{1,4})?$", icd):
-            icd_pen += (15 / len(meds)); deductions.append(f"Invalid ICD-10 format for '{m.get('expanded_drug_name')}'.")
+        if icd != "NOTSPECIFIED" and not re.match(r"^[A-TV-Z][0-9][0-9A-Z](\.[0-9A-Z]{1,4})?$", icd):
+            icd_pen += (15 / len(meds)); deductions.append(f"[Syntax Error] Invalid ICD-10 format: '{icd}'.")
 
     bdown["CMS Mapping"], bdown["ICD-10 Format"] = max(0, 15 - cms_pen), max(0, 15 - icd_pen)
     return {"score": int(round(score - cms_pen - icd_pen)), "breakdown": bdown, "issues": deductions}
 
 def semantic_audit(pil_image, data: dict) -> dict:
-    """LAYER 2: Visual cross-referencing AI to catch extraction errors (Max 50 Points)"""
+    """LAYER 2: Sub-Categorized Visual Critic (Max 50 Points)"""
     prompt = f"""
-    You are a Strict QA Auditor evaluating the EXTRACTION QUALITY of this JSON: {json.dumps(data)} against the image.
-    DO NOT judge the doctor's decisions. ONLY judge if the AI correctly transcribed what is on the paper.
+    You are a hostile Academic QA Auditor evaluating this JSON: {json.dumps(data)} against the image.
+    DO NOT judge medical intent. Judge ONLY exact optical transcription. 
+    
+    SUB-CATEGORIZED EVALUATION PROTOCOL:
+    1. MED COMPLETENESS (Omissions): Did the JSON drop whole medication lines? Did it drop written lab tests? Did it drop written vitals?
+    2. HALLUCINATIONS (Inventions): Did the AI invent drugs, dosages, or ICD-10 codes NOT physically written? If the prompt asked for an ICD-10 code but it wasn't on the paper, and the AI generated one, THAT IS A HALLUCINATION.
+    3. INSTRUCTION ACCURACY (Truncations): Look at the end of the handwritten lines. Were trailing durations ("x 20", "x 1m") or exact dosages dropped?
+    4. TRANSLATION ACCURACY (Interpretations): Did it map a tablet to a 'Reagent Test Kit'? Did it translate '1-0-1' incorrectly? 
 
-    1. OMISSIONS (MISSING MEDS): Count the handwritten lines. Did the JSON drop or skip any medications?
-    2. HALLUCINATIONS: Did the AI invent drugs, dosages, or instructions that are NOT physically written on the page?
-    3. TRUNCATIONS: Were critical markers like "x 20", "x 1m", or trailing numbers dropped from the JSON?
-    4. TRANSLATION ERRORS: Did the AI misinterpret the shorthand? (e.g., The image says '1-0-1' but the JSON incorrectly says 'Afternoon', or the image says 'OD' but JSON says 'Twice daily').
-
-    Return EXACT JSON: {{"missed_medications": [], "hallucinated_items": [], "truncated_instructions": [], "translation_errors": [], "audit_summary": ""}}
+    Return EXACT JSON matching this schema: 
+    {{
+      "missed_medication_lines": ["List dropped drug lines"],
+      "missed_vitals_or_labs": ["List dropped vitals/labs"],
+      "hallucinated_drugs_or_codes": ["List invented drugs or ICD-10 codes"],
+      "hallucinated_dosages": ["List invented dosages"],
+      "hallucinated_instructions": ["List invented frequencies"],
+      "truncated_dosages": ["List missing dosages that ARE written"],
+      "truncated_durations": ["List dropped durations"],
+      "misinterpreted_shorthand": ["List shorthand mistranslations"],
+      "formulation_mismatch": ["List tablet vs injection/kit mismatches"],
+      "audit_summary": "Strict explanation of errors found."
+    }}
     """
+    
     try:
         res = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=[prompt, pil_image], config=types.GenerateContentConfig(response_mime_type="application/json"))
         aud = clean_json(res.text)
     except Exception as e: 
         return {"ai_audit_score_out_of_50": 0, "issues": [f"Semantic Audit failed: {parse_api_error(e)}"]}
 
-    score, bdown, issues = 50, {"Med Completeness": 15, "No Hallucinations": 15, "Instruction Acc": 10, "Translation Acc": 10}, []
-    for key, pen_val, b_key in [("missed_medications", 7.5, "Med Completeness"), ("hallucinated_items", 15, "No Hallucinations"), ("truncated_instructions", 5, "Instruction Acc"), ("translation_errors", 5, "Translation Acc")]:
+    score = 50
+    bdown = {"Med Completeness": 15, "No Hallucinations": 15, "Instruction Acc": 10, "Translation Acc": 10}
+    issues = []
+
+    # Map subcategories to main UI buckets with proportional penalties
+    audit_matrix = [
+        ("missed_medication_lines", "Med Completeness", 10, "[Omission - Line]"),
+        ("missed_vitals_or_labs", "Med Completeness", 5, "[Omission - Clinical]"),
+        ("hallucinated_drugs_or_codes", "No Hallucinations", 7.5, "[Fatal Hallucination - Entity]"),
+        ("hallucinated_dosages", "No Hallucinations", 3.75, "[Hallucination - Value]"),
+        ("hallucinated_instructions", "No Hallucinations", 3.75, "[Hallucination - Context]"),
+        ("truncated_dosages", "Instruction Acc", 5, "[Truncation - Dosage]"),
+        ("truncated_durations", "Instruction Acc", 5, "[Truncation - Duration]"),
+        ("misinterpreted_shorthand", "Translation Acc", 5, "[Translation - Shorthand]"),
+        ("formulation_mismatch", "Translation Acc", 5, "[Translation - Formulation]")
+    ]
+
+    for key, bucket, max_pen, label in audit_matrix:
         if items := aud.get(key, []):
-            pen = min(bdown[b_key], len(items) * pen_val)
-            bdown[b_key] -= pen; score -= pen
-            issues.extend([f"{key}: {i}" for i in items])
+            penalty = min(max_pen, len(items) * max_pen)
+            actual_deduction = min(bdown[bucket], penalty)
+            bdown[bucket] -= actual_deduction
+            score -= actual_deduction
+            issues.extend([f"{label}: {i}" for i in items])
+            
     return {"ai_audit_score_out_of_50": score, "audit_summary": aud.get("audit_summary", ""), "breakdown": bdown, "issues": issues}
 
 # --- MAIN EXTRACTION ENDPOINT ---
@@ -125,58 +158,65 @@ async def process_prescription(file: UploadFile = File(...)):
         file_bytes = await file.read()
         np_arr = np.frombuffer(file_bytes, np.uint8)
         img_cv2 = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        
         if img_cv2 is None: raise HTTPException(400, "Invalid image upload. Please upload a standard JPEG or PNG.")
 
         # --- YOLO REDACTION SAFEGUARD ---
         total_area = img_cv2.shape[0] * img_cv2.shape[1]
         redaction_count = 0
-        MAX_REDACTIONS = 3  
-
         for res in yolo_model(img_cv2, verbose=False):
             boxes = sorted(res.boxes, key=lambda x: x.conf[0].item(), reverse=True)
             for box in boxes:
-                if redaction_count >= MAX_REDACTIONS: break 
+                if redaction_count >= 3: break 
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 if ((x2 - x1) * (y2 - y1)) < (total_area * 0.05):
                     cv2.rectangle(img_cv2, (x1, y1), (x2, y2), (0, 0, 0), -1)
                     redaction_count += 1
 
-        # --- PIL IMAGE CONVERSION (FIXES BLACK SCREEN) ---
         img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(img_rgb)
         buffered = io.BytesIO()
         pil_image.save(buffered, format="JPEG", quality=85)
         base64_img = f"data:image/jpeg;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
 
-        # --- THE STRICT TRANSCRIBER & INTERPRETER PROMPT ---
+        # --- ROBUST MORPHOLOGICAL TRANSCRIBER PROMPT ---
         extractor_prompt = f"""
-        You are an expert Clinical Transcriber. Your ONLY job is to transcribe the image EXACTLY as written and interpret the medical shorthand clearly. 
-        DO NOT hallucinate drugs. DO NOT infer missing medical decisions. Just read the ink.
+        You are an expert Clinical Transcriber processing an Indian EMR. 
+        Your primary directive is ROBUST OPTICAL RECOGNITION. Do not output "Not specified" if ink exists.
 
-        CRITICAL RULES:
-        1. CHAIN OF THOUGHT: Before structuring the JSON, populate the `step_1_raw_medication_lines` array. Transcribe every single line of medication you see exactly as it appears. Do not skip any.
-        2. EXHAUSTIVE EXTRACTION: Count the physical lines. If there are 6 lines, you MUST output 6 objects in the `medications` array.
-        3. RAW NAMES: Extract raw drug names literally (e.g., 'T- Panto', 'opem', 'Atorru', 'Thyronine').
-        4. DOSAGE HUNTING: Extract numbers in brackets or after dashes as 'dosage' (e.g., (10) -> 10mg). If missing, strictly write "Not specified". DO NOT GUESS DOSAGES.
-        5. SMART INSTRUCTION INTERPRETATION (CRITICAL): 
-           - Frequency: Translate 'OD' (Once daily), 'BD' (Twice daily), 'TDS' (Thrice daily), 'QDS' (Four times daily).
-           - Dash Notation: Translate strictly. '1-0-1' -> '1 morning, skip afternoon, 1 night'. '1-1-1' -> '1 morning, 1 afternoon, 1 night'.
-           - Duration: Translate 'x 20' -> 'for 20 days', 'x 1m' -> 'for 1 month', 'x 5d' -> 'for 5 days'. 
-           - Combine Frequency + Duration into the `frequency_and_duration` field (e.g., "Once daily for 20 days").
-           - Timings: Look for meal/time markers like 'AC' (Before meals), 'PC' (After meals), 'BBF' (Before breakfast), 'HS' (At bedtime). Put these clearly in the `special_instructions` field. If none, write "Not specified".
-        6. Assign a standard ICD-10 code (e.g., E11.9, K21.9).
+        CRITICAL ALGORITHM:
+        1. DEMOGRAPHICS: Carefully scan the top header. Extract the Patient Name, Age, Gender, Doctor Name, Visit Date, Registration (Reg) No, Token No, and Room No. If absent, write "Not specified".
+        2. IDENTIFICATION: Identify every line in the Advice/Medication section. Markers include bullets, dashes, or prefixes like "OT", "0T", "T-", "Rx", "Cap", "Syp".
+        3. PREFIX STRIPPING: A prefix like "OT " or "T-" indicates "Tablet". Ignore it when extracting the core drug name. (e.g., "OT opem" -> Drug is "opem").
+        4. PHONETIC TRANSCRIPTION: If handwriting is messy, write down the letters exactly as you see them. Never write "Not specified" for a drug name.
+        5. DOSAGE & DURATION: Look for numbers in brackets `(10)`, attached `750`, or trailing `x 20`. Extract them. DO NOT INFER DOSAGES.
+        6. ANTI-HALLUCINATION: Do NOT assign an ICD-10 code unless one is physically written on the page.
 
         Return strictly valid JSON matching this schema:
         {{
-          "step_1_raw_medication_lines": ["Exact transcription of line 1", "Exact transcription of line 2", "..."],
+          "step_1_raw_medication_lines": ["Line 1 transcription", "Line 2 transcription", "..."],
           "raw_spatial_scratchpad": {{"top_section_demographics": ["..."], "left_column_clinical_notes": ["..."]}},
           "hospital_details": {{"name": "...", "department": "..."}},
-          "patient_demographics": {{"name": "...", "age": "...", "gender": "...", "registration_number": "...", "doctor_name": ["..."], "visit_date": "..."}},
+          "patient_demographics": {{
+              "name": "...", 
+              "age": "...", 
+              "gender": "...", 
+              "registration_number": "...", 
+              "token_number": "...",
+              "room_number": "...",
+              "doctor_name": ["..."], 
+              "visit_date": "..."
+          }},
           "vitals_and_clinical_notes": {{"chief_complaints": ["..."], "other_notes": "..."}},
           "lab_investigations_prescribed": ["..."],
           "medications": [
-              {{"raw_shorthand_name": "exact transcription", "expanded_drug_name": "your best guess", "dosage": "...", "frequency_and_duration": "...", "special_instructions": "...", "associated_icd10_diagnosis": "...", "confidence_score": 95}}
+              {{
+                 "raw_shorthand_name": "exact line text", 
+                 "expanded_drug_name": "stripped and phonetically guessed drug name", 
+                 "dosage": "...", 
+                 "frequency_and_duration": "...", 
+                 "special_instructions": "...", 
+                 "associated_icd10_diagnosis": "Not specified" 
+              }}
           ]
         }}
         """
@@ -190,61 +230,54 @@ async def process_prescription(file: UploadFile = File(...)):
                 if "error" not in ext_data: break
             except Exception as e: 
                 friendly_error = parse_api_error(e)
-                print(f"Gemini API Request Failed (Attempt {attempt+1}): {friendly_error}")
                 ext_data = {"error": friendly_error}
                 if "Quota" in friendly_error or "Authentication" in friendly_error: break
                 time.sleep((attempt + 1) * 3)
 
         if "error" in ext_data: return {"status": "failed", "details": ext_data}
 
-        # --- SMART PYTHON INTERCEPTOR & CMS MAPPER ---
-        ocr_fixes = {
-            "ormm": "Atorvastatin", "atorru": "Atorvastatin", "atorrn": "Atorvastatin",
-            "taline": "Glimepiride", "glime": "Glimepiride", "dabz": "Dapagliflozin", 
-            "tendeli": "Teneligliptin", "tendli": "Teneligliptin", "mfn": "Metformin", 
-            "vogbi": "Voglibose", "vogli": "Voglibose", "opem": "Ondansetron", 
-            "thyronine": "Thyroxine", "calcim": "Calcium", "panto": "Pantoprazole",
-            "oralcain": "Oxetacaine"
-        }
-
+        # --- DYNAMIC PYTHON CMS MAPPER (No Hardcoded Typos) ---
         if CMS_DRUG_LIST and "medications" in ext_data:
             for m in ext_data["medications"]:
                 raw_name = str(m.get("raw_shorthand_name", "")).lower()
                 name = str(m.get("expanded_drug_name", "")).strip().title()
                 dos = str(m.get("dosage", "")).strip().lower().replace(" ", "")
                 
-                # 1. Apply Deterministic Fixes
-                for typo, fix in ocr_fixes.items():
-                    if re.search(rf'\b{typo}\b', raw_name) or re.search(rf'\b{typo}\b', name.lower()):
-                        name = fix; m["expanded_drug_name"] = fix
-                        break
-                
-                # 2. Formulation Blocking
+                # Dynamic Formulation Detection
                 formulation_hint = ""
-                if re.search(r'\bt\b|\btab\b|\bt-\b|\btas\b', raw_name):
+                # Safely detect variations of Tablet/Syrup/Injection
+                if re.search(r'\b(ot|0t|t-|tab|tas|tablet|cap)\b', raw_name) or re.search(r'\b(ot|0t|t-|tab|tas|tablet|cap)\b', name.lower()):
                     formulation_hint = "tab"
-                elif re.search(r'\bsyp\b|\bsyr\b|\bsop\b', raw_name):
+                elif re.search(r'\b(syp|syr|sop|syrup)\b', raw_name):
                     formulation_hint = "syr"
-                elif re.search(r'\binj\b', raw_name):
+                elif re.search(r'\b(inj|injection)\b', raw_name):
                     formulation_hint = "inj"
+                
+                # Clean up the AI's guess by stripping common prefixes mathematically
+                clean_name = re.sub(r'^(ot|0t|t-|rx)\s*', '', name.lower()).strip()
+                if len(clean_name) > 3:
+                    name = clean_name.title()
 
                 if "unknown" in name.lower() or name == "Not Specified":
                     m["cms_mapping_status"], m["official_cms_drug_name"] = "⚠️ Outside Purchase (Illegible)", "Unknown Drug"
                     continue
                 
-                # Filter out wrong formulations
+                # Exclusion Filters (Preventing test kits / wrong forms)
                 valid_cms_subset = CMS_DRUG_LIST
                 if formulation_hint == "tab":
-                    valid_cms_subset = [d for d in valid_cms_subset if "inj" not in d.lower() and "syr" not in d.lower()]
+                    valid_cms_subset = [d for d in valid_cms_subset if not re.search(r'\b(inj|injection|syr|syrup|kit|reagent|cream|ointment)\b', d.lower())]
                 elif formulation_hint == "syr":
-                    valid_cms_subset = [d for d in valid_cms_subset if "tab" not in d.lower() and "inj" not in d.lower()]
+                    valid_cms_subset = [d for d in valid_cms_subset if not re.search(r'\b(inj|tab|tablet|cap|kit|reagent)\b', d.lower())]
 
-                # Matching Logic
+                # Strict Match
                 match = next((d for d in valid_cms_subset if name.lower() in d.lower() and dos in d.lower().replace(" ", "") and dos != "notspecified"), None)
+                # Name Only Match
                 match = match or next((d for d in valid_cms_subset if name.lower() in d.lower() and len(name) > 4), None)
                 
+                # Dynamic Fuzzy Match (Handles misspellings like 'opem'->'ondem' mathematically)
                 if not match:
-                    fuzzy = difflib.get_close_matches(name, valid_cms_subset, n=3, cutoff=0.55)
+                    fuzzy = difflib.get_close_matches(name, valid_cms_subset, n=4, cutoff=0.45)
+                    # Filter fuzzy matches to ensure dosage aligns if available
                     match = next((f for f in fuzzy if dos in f.lower().replace(" ", "") or not re.search(r'\d', f)), fuzzy[0] if fuzzy else None)
                 
                 m["official_cms_drug_name"] = match or name
