@@ -188,7 +188,7 @@ export default function PrescriptionScanner() {
                       <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Meds Found:</span> <strong>{results.evaluation.semantic.breakdown["Med Completeness"]}/15</strong></div>
                       <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>All Notes Found:</span> <strong>{results.evaluation.semantic.breakdown["Notes Completeness"]}/10</strong></div>
                       <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>Instruction Acc:</span> <strong>{results.evaluation.semantic.breakdown["Instruction Accuracy"]}/10</strong></div>
-                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>No Hallucinations:</span> <strong>{results.evaluation.semantic.breakdown["No Hallucinations"]}/15</strong></div>
+                      <div style={{ fontSize: '12px', color: '#166534', display: 'flex', justifyContent: 'space-between' }}><span>Hallucinations:</span> <strong>{results.evaluation.semantic.breakdown["No Hallucinations"]}/15</strong></div>
                       
                       {results.evaluation.semantic.issues.map((iss, i) => (
                         <div key={i} style={{ fontSize: '11px', color: '#b91c1c', marginTop: '6px', lineHeight: '1.2' }}>• {iss}</div>

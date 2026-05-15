@@ -92,8 +92,8 @@ def semantic_audit(pil_image, data: dict) -> dict:
         aud = clean_json(res.text)
     except: return {"ai_audit_score_out_of_50": 0, "issues": ["Semantic Audit failed."]}
 
-    score, bdown, issues = 50, {"Med Completeness": 15, "Notes Completeness": 10, "Hallucinations": 15, "Instruction Accuracy": 10}, []
-    for key, pen_val, b_key in [("missed_medications", 7.5, "Med Completeness"), ("hallucinated_items", 15, " Hallucinations"), ("truncated_instructions", 5, "Instruction Accuracy")]:
+    score, bdown, issues = 50, {"Med Completeness": 15, "Notes Completeness": 10, "No Hallucinations": 15, "Instruction Accuracy": 10}, []
+    for key, pen_val, b_key in [("missed_medications", 7.5, "Med Completeness"), ("hallucinated_items", 15, " No Hallucinations"), ("truncated_instructions", 5, "Instruction Accuracy")]:
         if items := aud.get(key, []):
             pen = min(bdown[b_key], len(items) * pen_val)
             bdown[b_key] -= pen; score -= pen
