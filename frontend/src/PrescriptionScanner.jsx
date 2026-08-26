@@ -87,6 +87,8 @@ export default function PrescriptionScanner() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState('');
+  const [serverStatus, setServerStatus] = useState('checking'); // 'checking', 'online', 'waking'
   const [results, setResults] = useState(null);
   const [activeTab, setActiveTab] = useState('meds');
   const [theme, setTheme] = useState('light');
@@ -95,10 +97,28 @@ export default function PrescriptionScanner() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const fileInputRef = useRef(null);
+  const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Pre-warm / Wake up Render backend on page load
+  useEffect(() => {
+    const pingBackend = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/`, { signal: AbortSignal.timeout(8000) });
+        if (res.ok) {
+          setServerStatus('online');
+        } else {
+          setServerStatus('waking');
+        }
+      } catch (err) {
+        setServerStatus('waking');
+      }
+    };
+    pingBackend();
+  }, [API_BASE_URL]);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -139,37 +159,63 @@ export default function PrescriptionScanner() {
   const processImage = async () => {
     if (!file) return;
     setLoading(true);
+    setLoadingMsg('Connecting to backend...');
 
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
+    const maxAttempts = 3;
+    let attempt = 0;
+    let success = false;
 
-      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const response = await fetch(API_BASE_URL + '/api/process-prescription', {
-        method: 'POST',
-        body: formData,
-      });
+    while (attempt < maxAttempts && !success) {
+      attempt++;
+      try {
+        if (attempt > 1) {
+          setLoadingMsg(`Waking up cloud backend (Attempt ${attempt}/${maxAttempts})...`);
+        }
 
-      const data = await response.json();
+        const formData = new FormData();
+        formData.append('file', file);
 
-      if (!response.ok) {
-        alert('Notice: ' + (data.detail || 'Processing failed'));
-        setLoading(false);
-        return;
+        // 60-second timeout to allow Render free tier instance to cold-start
+        const response = await fetch(`${API_BASE_URL}/api/process-prescription`, {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(60000)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          alert('Notice: ' + (data.detail || 'Processing failed'));
+          setLoading(false);
+          setLoadingMsg('');
+          return;
+        }
+
+        if (data.anonymized_preview) {
+          setPreview(data.anonymized_preview);
+        }
+
+        setResults(data);
+        setServerStatus('online');
+        showToast('Prescription Verified Successfully');
+        success = true;
+      } catch (error) {
+        console.warn(`Extraction attempt ${attempt} warning:`, error);
+        if (attempt < maxAttempts) {
+          setLoadingMsg(`Cloud backend is booting up from sleep (~30s). Retrying automatically...`);
+          await new Promise(res => setTimeout(res, 6000));
+        } else {
+          console.error(error);
+          alert(
+            `Connection Notice (${API_BASE_URL}):\n\n` +
+            `1. Render Free Tier: If the service was inactive, it takes 30-50 seconds to spin up. Please wait 10 seconds and click 'Verify' again.\n` +
+            `2. If hosted on Vercel: Ensure you added 'VITE_API_URL' in Vercel Project Settings with your Render URL (e.g. https://your-backend.onrender.com).`
+          );
+        }
       }
-
-      if (data.anonymized_preview) {
-        setPreview(data.anonymized_preview);
-      }
-
-      setResults(data);
-      showToast('Prescription Verified Successfully');
-    } catch (error) {
-      console.error(error);
-      alert('Failed to connect to backend server. Please verify VITE_API_URL or try again.');
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
+    setLoadingMsg('');
   };
 
   const handleDownloadJSON = () => {
@@ -311,14 +357,19 @@ export default function PrescriptionScanner() {
             gap: '6px',
             fontSize: '12px',
             fontWeight: 600,
-            color: 'var(--success-text)',
-            backgroundColor: 'var(--success-subtle)',
-            border: '1px solid var(--success-border)',
+            color: serverStatus === 'online' ? 'var(--success-text)' : 'var(--warning-text)',
+            backgroundColor: serverStatus === 'online' ? 'var(--success-subtle)' : 'var(--warning-subtle)',
+            border: `1px solid ${serverStatus === 'online' ? 'var(--success-border)' : 'var(--warning-border)'}`,
             padding: '3px 10px',
             borderRadius: 'var(--radius-full)'
           }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--success)' }}></span>
-            CMS Formulary Active
+            <span style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              backgroundColor: serverStatus === 'online' ? 'var(--success)' : 'var(--warning)'
+            }}></span>
+            {serverStatus === 'online' ? 'Backend Ready' : serverStatus === 'waking' ? 'Cloud Server Waking Up' : 'Connecting Backend'}
           </div>
 
           <button
@@ -486,8 +537,11 @@ export default function PrescriptionScanner() {
           <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-main)', marginBottom: '4px' }}>
             Analyzing Document
           </h3>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            Running local YOLO privacy redaction, multimodal transcription, and CMS database grounding...
+          <p style={{ fontSize: '13px', color: 'var(--primary)', fontWeight: 600, marginBottom: '6px' }}>
+            {loadingMsg || 'Running local YOLO privacy redaction, multimodal transcription, and CMS database grounding...'}
+          </p>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            Render Free Tier cold-starts take ~30-40s on first load if the instance was sleeping.
           </p>
         </div>
       )}
