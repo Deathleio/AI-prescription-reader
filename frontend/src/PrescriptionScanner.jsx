@@ -182,14 +182,26 @@ export default function PrescriptionScanner() {
           signal: AbortSignal.timeout(60000)
         });
 
-        const data = await response.json();
-
         if (!response.ok) {
-          alert('Notice: ' + (data.detail || 'Processing failed'));
+          let errorMsg = `HTTP Error ${response.status}`;
+          try {
+            const errData = await response.json();
+            if (errData && errData.detail) errorMsg = errData.detail;
+          } catch (e) {
+            const rawText = await response.text();
+            if (response.status === 502 || rawText.includes('502')) {
+              errorMsg = 'Render 502 Bad Gateway: The backend service is either starting up or missing GEMINI_API_KEY in Render Environment Variables.';
+            } else if (response.status === 500) {
+              errorMsg = 'Server 500 Internal Error: Please ensure GEMINI_API_KEY is configured in your Render Environment Variables.';
+            }
+          }
+          alert(`Backend Notice: ${errorMsg}`);
           setLoading(false);
           setLoadingMsg('');
           return;
         }
+
+        const data = await response.json();
 
         if (data.anonymized_preview) {
           setPreview(data.anonymized_preview);
