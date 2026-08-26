@@ -29,7 +29,11 @@ def health_check():
 
 # --- MODEL INITIALIZATION ---
 MODEL_PATH = os.path.join(BASE_DIR, "runs/detect/train8/weights/best.pt")
-yolo_model = YOLO(MODEL_PATH if os.path.exists(MODEL_PATH) else os.path.join(BASE_DIR, "best.pt"))
+try:
+    yolo_model = YOLO(MODEL_PATH if os.path.exists(MODEL_PATH) else os.path.join(BASE_DIR, "best.pt"))
+except Exception as e:
+    print(f"YOLO load notice: {e}")
+    yolo_model = None
 
 gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
 if not gemini_key: raise ValueError("CRITICAL ERROR: GEMINI_API_KEY not found.")
@@ -166,16 +170,22 @@ async def process_prescription(file: UploadFile = File(...)):
         if img_cv2 is None: raise HTTPException(400, "Invalid image upload. Please upload a standard JPEG or PNG.")
 
         # --- YOLO REDACTION SAFEGUARD ---
-        total_area = img_cv2.shape[0] * img_cv2.shape[1]
-        redaction_count = 0
-        for res in yolo_model(img_cv2, verbose=False):
-            boxes = sorted(res.boxes, key=lambda x: x.conf[0].item(), reverse=True)
-            for box in boxes:
-                if redaction_count >= 3: break 
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                if ((x2 - x1) * (y2 - y1)) < (total_area * 0.05):
-                    cv2.rectangle(img_cv2, (x1, y1), (x2, y2), (0, 0, 0), -1)
-                    redaction_count += 1
+        if yolo_model is not None:
+            try:
+                import torch
+                with torch.no_grad():
+                    total_area = img_cv2.shape[0] * img_cv2.shape[1]
+                    redaction_count = 0
+                    for res in yolo_model(img_cv2, verbose=False, imgsz=640, device='cpu'):
+                        boxes = sorted(res.boxes, key=lambda x: x.conf[0].item(), reverse=True)
+                        for box in boxes:
+                            if redaction_count >= 3: break 
+                            x1, y1, x2, y2 = map(int, box.xyxy[0])
+                            if ((x2 - x1) * (y2 - y1)) < (total_area * 0.05):
+                                cv2.rectangle(img_cv2, (x1, y1), (x2, y2), (0, 0, 0), -1)
+                                redaction_count += 1
+            except Exception as err:
+                print(f"YOLO Safeguard Notice: {err}")
 
         img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(img_rgb)
