@@ -23,6 +23,10 @@ load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+@app.get("/")
+def health_check():
+    return {"status": "ok", "service": "AI Prescription Reader Backend"}
+
 # --- MODEL INITIALIZATION ---
 MODEL_PATH = os.path.join(BASE_DIR, "runs/detect/train8/weights/best.pt")
 yolo_model = YOLO(MODEL_PATH if os.path.exists(MODEL_PATH) else os.path.join(BASE_DIR, "best.pt"))

@@ -1,6 +1,7 @@
 # Ignore Environment Variables & Secrets
 .env
 .env.*
+!.env.example
 
 # Ignore Python Cache & Virtual Environments
 __pycache__/

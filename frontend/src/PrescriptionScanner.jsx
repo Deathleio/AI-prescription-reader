@@ -24,7 +24,8 @@ export default function PrescriptionScanner() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://localhost:8000/api/process-prescription', {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/process-prescription`, {
         method: 'POST',
         body: formData,
       });
