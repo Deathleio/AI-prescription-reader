@@ -27,38 +27,29 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 def health_check():
     return {"status": "ok", "service": "AI Prescription Reader Backend"}
 
-# --- MODEL INITIALIZATION ---
-MODEL_PATH = os.path.join(BASE_DIR, "runs/detect/train8/weights/best.pt")
-try:
-    yolo_model = YOLO(MODEL_PATH if os.path.exists(MODEL_PATH) else os.path.join(BASE_DIR, "best.pt"))
-except Exception as e:
-    print(f"YOLO load notice: {e}")
-    yolo_model = None
+# --- MODEL & RAG INITIALIZATION ---
+from rag_service import query_cms_rag, query_clinical_rag, build_and_index_rag
 
 gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
 if not gemini_key: raise ValueError("CRITICAL ERROR: GEMINI_API_KEY not found.")
 gemini_client = genai.Client(api_key=gemini_key)
 
-# --- IN-MEMORY CMS DB ---
-CMS_DRUG_LIST = []
+# Optional lightweight YOLO check
+yolo_model = None
+try:
+    from ultralytics import YOLO
+    MODEL_PATH = os.path.join(BASE_DIR, "runs/detect/train8/weights/best.pt")
+    yolo_model = YOLO(MODEL_PATH if os.path.exists(MODEL_PATH) else os.path.join(BASE_DIR, "best.pt"))
+except Exception as e:
+    pass
 
 @app.on_event("startup")
 async def load_datasets():
-    global CMS_DRUG_LIST
-    csv_path = next((os.path.join(BASE_DIR, n) for n in ["CMS-DATASET.csv", "CMS-DATASET.xlsx - Sheet1.csv"] if os.path.exists(os.path.join(BASE_DIR, n))), None)
-    
-    if csv_path:
-        try:
-            df = pd.read_csv(csv_path, dtype=str, encoding='utf-8')
-        except UnicodeDecodeError:
-            df = pd.read_csv(csv_path, dtype=str, encoding='latin1')
-            
-        df.columns = df.columns.str.strip().str.lower()
-        col = next((c for c in df.columns if any(k in c for k in ['drug', 'name', 'expanded'])), None)
-        
-        if col:
-            CMS_DRUG_LIST = list(set(str(row).strip() for row in df[col] if str(row).lower() != 'nan'))
-            print(f"✅ CMS Dataset loaded! ({len(CMS_DRUG_LIST)} drugs indexed)")
+    try:
+        build_and_index_rag()
+        print("ChromaDB Vector RAG system initialized and ready!")
+    except Exception as e:
+        print(f"RAG init notice: {e}")
 
 def clean_json(text: str) -> dict:
     try: return json.loads(text.replace('```json', '').replace('```', '').strip())
@@ -263,55 +254,18 @@ async def process_prescription(file: UploadFile = File(...)):
         if "error" in ext_data: 
             raise HTTPException(status_code=422, detail=ext_data["error"])
 
-        # --- DYNAMIC PYTHON CMS MAPPER ---
-        if CMS_DRUG_LIST and "medications" in ext_data:
+        # --- CHROMADB RAG VECTOR GROUNDING ---
+        if "medications" in ext_data and ext_data["medications"]:
             for m in ext_data["medications"]:
-                raw_name = str(m.get("raw_shorthand_name", "")).lower()
-                name = str(m.get("expanded_drug_name", "")).strip().title()
-                dos = str(m.get("dosage", "")).strip().lower().replace(" ", "")
+                raw_name = str(m.get("raw_shorthand_name", "")).strip()
+                name = str(m.get("expanded_drug_name", "")).strip()
+                dos = str(m.get("dosage", "")).strip()
                 
-                conf = m.get("confidence_score", 85)
-                try: conf = int(conf)
-                except: conf = 85
-                
-                formulation_hint = ""
-                if re.search(r'\b(ot|0t|t-|tab|tas|tablet|cap)\b', raw_name) or re.search(r'\b(ot|0t|t-|tab|tas|tablet|cap)\b', name.lower()):
-                    formulation_hint = "tab"
-                elif re.search(r'\b(syp|syr|sop|syrup)\b', raw_name):
-                    formulation_hint = "syr"
-                elif re.search(r'\b(inj|injection)\b', raw_name):
-                    formulation_hint = "inj"
-                
-                clean_name = re.sub(r'^(ot|0t|t-|rx)\s*', '', name.lower()).strip()
-                if len(clean_name) > 3:
-                    name = clean_name.title()
-
-                if "unknown" in name.lower() or name == "Not Verifiable":
-                    m["cms_mapping_status"], m["official_cms_drug_name"], m["confidence_score"] = "⚠️ Outside Purchase (Illegible)", "Unknown Drug", 0
-                    continue
-                
-                valid_cms_subset = CMS_DRUG_LIST
-                if formulation_hint == "tab":
-                    valid_cms_subset = [d for d in valid_cms_subset if not re.search(r'\b(inj|injection|syr|syrup|kit|reagent|cream|ointment)\b', d.lower())]
-                elif formulation_hint == "syr":
-                    valid_cms_subset = [d for d in valid_cms_subset if not re.search(r'\b(inj|tab|tablet|cap|kit|reagent)\b', d.lower())]
-
-                match = next((d for d in valid_cms_subset if name.lower() in d.lower() and dos in d.lower().replace(" ", "") and dos != "notverifiable"), None)
-                match = match or next((d for d in valid_cms_subset if name.lower() in d.lower() and len(name) > 4), None)
-                
-                if not match:
-                    fuzzy = difflib.get_close_matches(name, valid_cms_subset, n=4, cutoff=0.45)
-                    match = next((f for f in fuzzy if dos in f.lower().replace(" ", "") or not re.search(r'\d', f)), fuzzy[0] if fuzzy else None)
-                    
-                    if match:
-                        sim_ratio = int(difflib.SequenceMatcher(None, name.lower(), match.lower()).ratio() * 100)
-                        conf = int((conf + sim_ratio) / 2)
-                else:
-                    conf = max(conf, 95)
-                
-                m["official_cms_drug_name"] = match or name
-                m["cms_mapping_status"] = "✅ CMS Verified Match" if match else "⚠️ Outside Purchase"
-                m["confidence_score"] = conf
+                # Query ChromaDB RAG vector index
+                rag_res = query_cms_rag(raw_name, name, dos)
+                m["official_cms_drug_name"] = rag_res["match"]
+                m["cms_mapping_status"] = rag_res["status"]
+                m["confidence_score"] = rag_res["confidence"]
 
         # --- RUN AUDITS ---
         det_rep = deterministic_audit(ext_data)
