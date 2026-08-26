@@ -14,7 +14,6 @@ from dotenv import load_dotenv, dotenv_values
 from google import genai
 from google.genai import types 
 import cv2
-from ultralytics import YOLO
 import numpy as np
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,23 +24,23 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/")
 def health_check():
-    return {"status": "ok", "service": "AI Prescription Reader Backend"}
+    return {"status": "ok", "service": "Pharma Help AI Prescription Reader Backend"}
 
 # --- MODEL & RAG INITIALIZATION ---
-from rag_service import query_cms_rag, query_clinical_rag, build_and_index_rag
+from rag_service import verify_and_enrich_prescription, query_cms_rag, query_clinical_rag, build_and_index_rag
 
 gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
 if not gemini_key: raise ValueError("CRITICAL ERROR: GEMINI_API_KEY not found.")
 gemini_client = genai.Client(api_key=gemini_key)
 
-# Optional lightweight YOLO check
+# Optional YOLO detection hook
 yolo_model = None
 try:
     from ultralytics import YOLO
     MODEL_PATH = os.path.join(BASE_DIR, "runs/detect/train8/weights/best.pt")
     yolo_model = YOLO(MODEL_PATH if os.path.exists(MODEL_PATH) else os.path.join(BASE_DIR, "best.pt"))
-except Exception as e:
-    pass
+except Exception:
+    yolo_model = None
 
 @app.on_event("startup")
 async def load_datasets():
@@ -254,18 +253,8 @@ async def process_prescription(file: UploadFile = File(...)):
         if "error" in ext_data: 
             raise HTTPException(status_code=422, detail=ext_data["error"])
 
-        # --- CHROMADB RAG VECTOR GROUNDING ---
-        if "medications" in ext_data and ext_data["medications"]:
-            for m in ext_data["medications"]:
-                raw_name = str(m.get("raw_shorthand_name", "")).strip()
-                name = str(m.get("expanded_drug_name", "")).strip()
-                dos = str(m.get("dosage", "")).strip()
-                
-                # Query ChromaDB RAG vector index
-                rag_res = query_cms_rag(raw_name, name, dos)
-                m["official_cms_drug_name"] = rag_res["match"]
-                m["cms_mapping_status"] = rag_res["status"]
-                m["confidence_score"] = rag_res["confidence"]
+        # --- CHROMADB RAG VECTOR GROUNDING & ENRICHMENT ---
+        ext_data = verify_and_enrich_prescription(ext_data)
 
         # --- RUN AUDITS ---
         det_rep = deterministic_audit(ext_data)

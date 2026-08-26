@@ -80,7 +80,7 @@ def build_and_index_rag():
             metas = unique_metas[i:i+batch_size]
             ids = [f'entity_{i+j}' for j in range(len(batch))]
             clin_col.upsert(ids=ids, documents=batch, metadatas=metas)
-        print(f'✅ Indexed {clin_col.count()} Clinical Findings/Entities into ChromaDB.')
+        print(f"[RAG] Indexed {clin_col.count()} Clinical Findings/Entities into ChromaDB.")
 
 def query_cms_rag(raw_shorthand: str, expanded_name: str, dosage: str = '', n_results: int = 3) -> dict:
     client = get_chroma_client()
@@ -100,9 +100,10 @@ def query_cms_rag(raw_shorthand: str, expanded_name: str, dosage: str = '', n_re
         
         if not candidates:
             return {
-                'match': expanded_name,
+                'match': expanded_name or raw_shorthand,
                 'status': '⚠️ Outside Purchase',
-                'confidence': 50
+                'confidence': 50,
+                'top_candidates': []
             }
             
         best_match = candidates[0]
@@ -127,11 +128,12 @@ def query_cms_rag(raw_shorthand: str, expanded_name: str, dosage: str = '', n_re
             'top_candidates': candidates
         }
     except Exception as e:
-        print(f'ChromaDB RAG query error: {e}')
+        print(f'[RAG] ChromaDB query notice: {e}')
         return {
-            'match': expanded_name,
+            'match': expanded_name or raw_shorthand,
             'status': '⚠️ Outside Purchase',
-            'confidence': 70
+            'confidence': 70,
+            'top_candidates': []
         }
 
 def query_clinical_rag(symptom_or_test: str, n_results: int = 2) -> list:
@@ -142,6 +144,32 @@ def query_clinical_rag(symptom_or_test: str, n_results: int = 2) -> list:
         return results['documents'][0] if results and results['documents'] else []
     except Exception:
         return []
+
+def verify_and_enrich_prescription(ext_data: dict) -> dict:
+    """Uses ChromaDB RAG Vector Store to verify and enrich extracted prescription data."""
+    if not isinstance(ext_data, dict):
+        return ext_data
+
+    # 1. Verify & Ground Medications
+    if "medications" in ext_data and isinstance(ext_data["medications"], list):
+        for m in ext_data["medications"]:
+            raw_name = str(m.get("raw_shorthand_name", "")).strip()
+            name = str(m.get("expanded_drug_name", "")).strip()
+            dos = str(m.get("dosage", "")).strip()
+            
+            # Query ChromaDB RAG vector index
+            rag_res = query_cms_rag(raw_name, name, dos)
+            m["official_cms_drug_name"] = rag_res["match"]
+            m["cms_mapping_status"] = rag_res["status"]
+            m["confidence_score"] = rag_res["confidence"]
+
+            # Derive ICD-10 if not present or unverified
+            if not m.get("associated_icd10_diagnosis") or m.get("associated_icd10_diagnosis") == "Not verifiable":
+                clin_matches = query_clinical_rag(f"{name} {raw_name}", n_results=1)
+                if clin_matches:
+                    m["associated_icd10_diagnosis"] = f"Related to {clin_matches[0]}"
+
+    return ext_data
 
 if __name__ == '__main__':
     build_and_index_rag()
