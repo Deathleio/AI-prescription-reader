@@ -1,110 +1,100 @@
 /* 
   ========================================================================
-  PulseRx - Design System: Warm Clinical Glow & Ambient Lighting
+  Pharma Help - Clean, Professional Clinical Design System
   ========================================================================
 */
 
 :root {
-  /* Warm Ambient Palette */
-  --bg-warm: #FAF8F5;
+  /* Calming Professional Medical Palette */
+  --bg-page: #F8FAFC;
   --bg-surface: #FFFFFF;
-  --bg-surface-elevated: #FFFDF9;
-  --bg-surface-translucent: rgba(255, 255, 255, 0.85);
-  --bg-surface-sunken: #F4EFEA;
-  --bg-card-hover: #FDFBF7;
+  --bg-subtle: #F1F5F9;
+  --bg-hover: #F8FAFC;
 
-  /* Primary Brand: Warm Amber & Burnished Bronze */
-  --primary: #D97706;
-  --primary-hover: #B45309;
-  --primary-light: #FEF3C7;
-  --primary-glow: rgba(217, 119, 6, 0.18);
-  --primary-border: rgba(217, 119, 6, 0.25);
+  /* Primary: Professional Slate Blue */
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --primary-subtle: #EFF6FF;
+  --primary-border: #DBEAFE;
+  --primary-dark: #1E3A8A;
 
-  /* Secondary Accents */
-  --accent-terracotta: #EA580C;
-  --accent-copper: #C2410C;
-  --accent-gold: #F59E0B;
+  /* Text Hierarchy */
+  --text-main: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+  --text-light: #94A3B8;
 
-  /* Semantic Status Colors */
-  --success: #059669;
-  --success-light: #ECFDF5;
-  --success-border: #A7F3D0;
-  --success-text: #065F46;
-
-  --info: #2563EB;
-  --info-light: #EFF6FF;
-  --info-border: #BFDBFE;
-  --info-text: #1E40AF;
+  /* Semantic Accents (Muted & Clean) */
+  --success: #0D9488;
+  --success-subtle: #F0FDFA;
+  --success-border: #CCFBF1;
+  --success-text: #115E59;
 
   --warning: #D97706;
-  --warning-light: #FFFBEB;
-  --warning-border: #FDE68A;
+  --warning-subtle: #FFFBEB;
+  --warning-border: #FEF3C7;
   --warning-text: #92400E;
 
-  --danger: #DC2626;
-  --danger-light: #FEF2F2;
-  --danger-border: #FECACA;
-  --danger-text: #991B1B;
+  --info: #0284C7;
+  --info-subtle: #F0F9FF;
+  --info-border: #E0F2FE;
+  --info-text: #0369A1;
 
-  /* Typography & Slate */
-  --text-main: #1E293B;
-  --text-secondary: #475569;
-  --text-muted: #94A3B8;
-  --text-inverse: #FFFFFF;
+  --danger: #E11D48;
+  --danger-subtle: #FFF1F2;
+  --danger-border: #FFE4E6;
+  --danger-text: #9F1239;
 
   /* Borders & Dividers */
-  --border-subtle: #EBE5DC;
-  --border-medium: #DDD6CA;
-  --border-active: #D97706;
+  --border-light: #E2E8F0;
+  --border-card: #E2E8F0;
+  --border-focus: #CBD5E1;
 
-  /* Atmospheric Shadows & Glows */
-  --shadow-sm: 0 1px 2px rgba(30, 41, 59, 0.04);
-  --shadow-md: 0 4px 12px -2px rgba(30, 41, 59, 0.06), 0 2px 6px -1px rgba(217, 119, 6, 0.04);
-  --shadow-lg: 0 12px 32px -4px rgba(30, 41, 59, 0.08), 0 4px 16px -2px rgba(217, 119, 6, 0.06);
-  --shadow-xl: 0 20px 48px -6px rgba(30, 41, 59, 0.12), 0 8px 24px -3px rgba(217, 119, 6, 0.08);
-  --glow-warm: 0 0 40px -10px rgba(245, 158, 11, 0.25);
-  --glow-amber-btn: 0 4px 20px rgba(217, 119, 6, 0.35);
+  /* Shadows (Subtle, Clean) */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.06), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.06), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
 
-  /* Radii */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --radius-full: 9999px;
 
-  /* Fonts */
+  /* Typography */
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 [data-theme="dark"] {
-  --bg-warm: #14120E;
-  --bg-surface: #1E1B16;
-  --bg-surface-elevated: #26221C;
-  --bg-surface-translucent: rgba(30, 27, 22, 0.85);
-  --bg-surface-sunken: #110F0C;
-  --bg-card-hover: #2E2922;
+  --bg-page: #0B0F19;
+  --bg-surface: #111827;
+  --bg-subtle: #1F2937;
+  --bg-hover: #1E293B;
 
-  --primary: #F59E0B;
-  --primary-hover: #FBBF24;
-  --primary-light: rgba(245, 158, 11, 0.15);
-  --primary-glow: rgba(245, 158, 11, 0.25);
-  --primary-border: rgba(245, 158, 11, 0.3);
+  --primary: #3B82F6;
+  --primary-hover: #60A5FA;
+  --primary-subtle: rgba(59, 130, 246, 0.12);
+  --primary-border: rgba(59, 130, 246, 0.25);
+  --primary-dark: #93C5FD;
 
   --text-main: #F8FAFC;
   --text-secondary: #CBD5E1;
-  --text-muted: #64748B;
+  --text-muted: #94A3B8;
+  --text-light: #64748B;
 
-  --border-subtle: #332C23;
-  --border-medium: #423A2F;
+  --border-light: #1F2937;
+  --border-card: #1F2937;
+  --border-focus: #374151;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 16px -2px rgba(0, 0, 0, 0.5), 0 2px 8px -1px rgba(245, 158, 11, 0.05);
-  --shadow-lg: 0 12px 32px -4px rgba(0, 0, 0, 0.6), 0 4px 20px -2px rgba(245, 158, 11, 0.08);
-  --shadow-xl: 0 24px 50px -8px rgba(0, 0, 0, 0.8);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.6);
 }
 
-/* Base Resets */
+/* Base Styles */
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -114,42 +104,22 @@
 html {
   font-family: var(--font-sans);
   color: var(--text-main);
-  background-color: var(--bg-warm);
+  background-color: var(--bg-page);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  scroll-behavior: smooth;
 }
 
 body {
   min-height: 100vh;
-  position: relative;
-  background-color: var(--bg-warm);
-  overflow-x: hidden;
+  background-color: var(--bg-page);
+  color: var(--text-main);
 }
 
-/* Ambient Warm Lighting Mesh Background */
-.ambient-glow-mesh {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 650px;
-  background: 
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(245, 158, 11, 0.12), transparent 70%),
-    radial-gradient(ellipse 60% 40% at 85% 15%, rgba(234, 88, 12, 0.08), transparent 60%),
-    radial-gradient(ellipse 50% 40% at 15% 20%, rgba(251, 191, 36, 0.08), transparent 60%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* Main Container */
 .app-container {
-  position: relative;
-  z-index: 1;
-  max-width: 1320px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 24px 24px 80px 24px;
+  padding: 24px 20px 60px 20px;
 }
 
 /* Typography Utility */
@@ -159,46 +129,30 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: -0.02em;
 }
 
-.mono {
-  font-family: var(--font-mono);
-}
-
-/* Buttons & Inputs */
+/* Clean Button Styles */
 button {
   font-family: var(--font-sans);
   font-weight: 600;
   cursor: pointer;
   border: none;
   outline: none;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.15s ease-in-out;
 }
 
 button:active {
-  transform: scale(0.98);
+  transform: scale(0.99);
 }
 
 button:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
   transform: none !important;
 }
 
-/* Animations */
+/* Keyframe Animations */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes pulseGlow {
-  0%, 100% { opacity: 0.6; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.05); }
-}
-
-@keyframes scanLine {
-  0% { top: 0%; opacity: 0; }
-  15% { opacity: 1; }
-  85% { opacity: 1; }
-  100% { top: 100%; opacity: 0; }
 }
 
 @keyframes spin {
@@ -207,77 +161,39 @@ button:disabled {
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeIn 0.25s ease-out forwards;
 }
 
 .animate-spin {
-  animation: spin 1.2s linear infinite;
+  animation: spin 1s linear infinite;
 }
 
-/* Custom Scrollbars */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--bg-warm);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--border-medium);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--primary);
-}
-
-/* Print Stylesheet for High Quality Clean Clinical PDF Output */
-@media print {
-  body {
-    background: #FFFFFF !important;
-    color: #000000 !important;
-  }
-  .ambient-glow-mesh,
-  .no-print,
-  nav,
-  .header-actions,
-  .dropzone-container,
-  .footer-container {
-    display: none !important;
-  }
-  .app-container {
-    max-width: 100% !important;
-    padding: 0 !important;
-    margin: 0 !important;
-  }
-  .print-clean {
-    border: none !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    background: #FFFFFF !important;
-  }
-  .print-force-show {
-    display: block !important;
-  }
-  .clinical-print-header {
-    display: block !important;
-    border-bottom: 2px solid #1e293b;
-    padding-bottom: 12px;
-    margin-bottom: 20px;
-  }
-}
-
-@media (max-width: 960px) {
+/* Responsive Utilities */
+@media (max-width: 900px) {
   .workspace-grid {
     grid-template-columns: 1fr !important;
   }
 }
 
-@media (min-width: 768px) {
-  .status-pill {
-    display: inline-flex !important;
+@media print {
+  body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+  }
+  .no-print,
+  nav,
+  .dropzone-section,
+  footer {
+    display: none !important;
+  }
+  .app-container {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+  .print-clean {
+    border: none !important;
+    box-shadow: none !important;
+    background: #FFFFFF !important;
   }
 }
 
